@@ -41,8 +41,7 @@
 	a design tool, and Config.luau's TIDE_* levers are where the game is tuned.
 ]]
 
-local scriptParent = script and script.Parent
-local Config = require(scriptParent and scriptParent.Config or "./Config")
+local Config = require("./Config")
 
 export type Constituent = {
 	name: string,

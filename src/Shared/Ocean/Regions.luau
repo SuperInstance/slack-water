@@ -18,9 +18,8 @@
 	generated "Region 47B" would quietly undercut that.
 ]]
 
-local scriptParent = script and script.Parent
-local Rng = require(scriptParent and scriptParent.Rng or "./Rng")
-local Species = require(scriptParent and scriptParent.Parent.Species or "../Species")
+local Rng = require("./Rng")
+local Species = require("../Species")
 
 type Habitat = "kelp" | "reef" | "sand" | "mud" | "open" | "estuary"
 

@@ -70,6 +70,29 @@ echo "  $typecount type diagnostics (NOT gated — Roblox type defs are missing)
 echo "  see the header comment in this file"
 
 echo ""
+echo "== instance-path requires in Shared =="
+# Every require in src/Shared must use a STRING path.
+#
+# The alternative -- require(script.Parent.Config) -- looks tidier, and under
+# the Luau CLI it works, so it passed 30/30 boot tests and 172 unit tests. But
+# Roblox resolves Instance children under --!strict at RUNTIME: indexing a
+# Folder for a child that does not exist is an error, not nil. So one wrong
+# hop (Chart.luau asked Shared/Ocean for Config, which lives in Shared/) threw
+# "Config is not a valid member of Folder", the module never loaded, and the
+# entire server boot died silently -- no lighting, no world, no player, just
+# the client UI over an empty baseplate.
+#
+# String requires behave identically in Roblox and the CLI and cannot make
+# that mistake, so this is the only form allowed.
+if grep -rn "require(script" src/Shared/ 2>/dev/null | grep -q .; then
+  echo "  FAILED — instance-path require(s) found in src/Shared:"
+  grep -rn "require(script" src/Shared/ 2>/dev/null | sed 's/^/    /'
+  status=1
+else
+  echo "  ok — all Shared requires use string paths"
+fi
+
+echo ""
 echo "== tests =="
 if [ -x ./tests/run.sh ]; then
   ./tests/run.sh || status=1

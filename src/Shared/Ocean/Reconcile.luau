@@ -49,9 +49,8 @@
 	headlessly testable.
 ]]
 
-local scriptParent = script and script.Parent
-local OceanSim = require(scriptParent and scriptParent.OceanSim or "./OceanSim")
-local Config = require(scriptParent and scriptParent.Parent.Config or "../Config")
+local OceanSim = require("./OceanSim")
+local Config = require("../Config")
 
 export type PendingDelta = {
 	regionId: string,

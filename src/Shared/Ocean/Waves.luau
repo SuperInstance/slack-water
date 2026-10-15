@@ -39,9 +39,8 @@
 	  a forecast model.
 ]]
 
-local scriptParent = script and script.Parent
-local Rng = require(scriptParent and scriptParent.Rng or "./Rng")
-local Config = require(scriptParent and scriptParent.Parent.Config or "../Config")
+local Rng = require("./Rng")
+local Config = require("../Config")
 
 local Waves = {}
 

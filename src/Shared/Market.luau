@@ -27,9 +27,8 @@
 	  design is trying to prevent.
 ]]
 
-local scriptParent = script and script.Parent
-local Config = require(scriptParent and scriptParent.Config or "./Config")
-local Species = require(scriptParent and scriptParent.Species or "./Species")
+local Config = require("./Config")
+local Species = require("./Species")
 
 export type Direction = "rising" | "falling" | "flat"
 

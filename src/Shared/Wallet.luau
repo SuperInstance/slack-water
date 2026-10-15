@@ -25,8 +25,7 @@
 	server service) and the money rules stay here, testable headlessly.
 ]]
 
-local scriptParent = script and script.Parent
-local Species = require(scriptParent and scriptParent.Species or "./Species")
+local Species = require("./Species")
 
 export type HeldCatch = {
 	catchId: string,

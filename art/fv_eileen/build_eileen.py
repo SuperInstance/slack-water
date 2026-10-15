@@ -53,8 +53,8 @@ import sys
 # Dimensions (studs == feet). Change LOA here and everything follows.
 # -----------------------------------------------------------------------------
 
-LOA = 58.0          # length overall, ESTIMATED from photos
-BEAM = 16.0         # max beam, estimated
+LOA = 50.0          # length overall — CONFIRMED by the owner, 50 ft
+BEAM = 14.0         # max beam, scaled to a realistic 0.28 L/B for a working F/V
 FREEBOARD_MID = 4.4 # deck height above waterline amidships
 FREEBOARD_BOW = 6.4 # sheer rise forward
 FREEBOARD_STERN = 5.0

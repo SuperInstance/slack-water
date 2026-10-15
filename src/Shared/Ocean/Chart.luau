@@ -49,9 +49,8 @@
 	9451054. Verify the station before trusting any tide or datum metadata.
 ]]
 
-local scriptParent = script and script.Parent
-local Config = require(scriptParent and script.Parent.Config or "../Config")
-local Rng = require(scriptParent and scriptParent.Rng or "./Rng")
+local Config = require("../Config")
+local Rng = require("./Rng")
 
 type Habitat = "kelp" | "reef" | "sand" | "mud" | "open" | "estuary"
 

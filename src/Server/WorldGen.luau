@@ -126,7 +126,7 @@ function WorldGenService.buildDeck(folder: any): any
 		mesh.Parent = deck
 	end
 
-	local HULL_LEN, HULL_BEAM = 58, 16
+	local HULL_LEN, HULL_BEAM = 50, 14 -- confirmed by the owner: 50 ft overall
 	local DECK_Y = 4.4 -- sheer height; the waterline stays at y = 0
 
 	-- Collision surface. A single wide slab, inset from the visible hull so
@@ -267,7 +267,7 @@ function WorldGenService.buildDeck(folder: any): any
 	local reel = Instance.new("Part")
 	reel.Name = "NetReel"
 	reel.Size = Vector3.new(9, 3.2, 10)
-	reel.CFrame = CFrame.new(-18, DECK_Y + 2.1, 0)
+	reel.CFrame = CFrame.new(-15, DECK_Y + 2.1, 0)
 	reel.Anchored = true
 	reel.CanCollide = false
 	reel.Material = Enum.Material.Fabric
@@ -278,7 +278,7 @@ function WorldGenService.buildDeck(folder: any): any
 		local leg = Instance.new("Part")
 		leg.Name = "AFrame"
 		leg.Size = Vector3.new(0.6, 9, 0.6)
-		leg.CFrame = CFrame.new(-26, DECK_Y + 5, side * 2.8)
+		leg.CFrame = CFrame.new(-21, DECK_Y + 5, side * 2.5)
 		leg.Anchored = true
 		leg.CanCollide = false
 		leg.Material = Enum.Material.Metal

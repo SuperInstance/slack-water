@@ -70,10 +70,9 @@ export type Ocean = {
 -- interpreter `script` does not exist, so the fallback relative path is used
 -- instead, which lets the simulation run headlessly in tests. Keep the two in
 -- sync — the fallback is the same file at the same depth.
-local scriptParent = script and script.Parent
-local Rng = require(scriptParent and scriptParent.Rng or "./Rng")
-local Config = require(scriptParent and scriptParent.Parent.Config or "../Config")
-local Species = require(scriptParent and scriptParent.Parent.Species or "../Species")
+local Rng = require("./Rng")
+local Config = require("../Config")
+local Species = require("../Species")
 
 local OceanSim = {}
 export type OceanSim = typeof(OceanSim)

@@ -37,9 +37,8 @@
 	data is untrusted and repaired on restore, never believed.
 ]]
 
-local scriptParent = script and script.Parent
-local Types = require(scriptParent and scriptParent.Types or "./Types")
-local Species = require(scriptParent and scriptParent.Species or "./Species")
+local Types = require("./Types")
+local Species = require("./Species")
 
 export type Gear = typeof(Types.Gear.handline)
 

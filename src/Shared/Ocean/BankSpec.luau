@@ -32,9 +32,8 @@
 	poetic.
 ]]
 
-local scriptParent = script and script.Parent
-local Config = require(scriptParent and scriptParent.Parent.Config or "../Config")
-local Species = require(scriptParent and scriptParent.Parent.Species or "../Species")
+local Config = require("../Config")
+local Species = require("../Species")
 
 type Habitat = "kelp" | "reef" | "sand" | "mud" | "open" | "estuary"
 
