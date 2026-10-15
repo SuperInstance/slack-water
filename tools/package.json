@@ -1,0 +1,8 @@
+{
+  "name": "slack-water-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Playtest automation for Slack Water. Not shipped with the game.",
+  "type": "module",
+  "devDependencies": { "playwright-core": "^1.49.0" }
+}

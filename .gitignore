@@ -9,6 +9,9 @@
 sourcemap.json
 *.png.meta
 
+# Playtest harness
+tools/node_modules/
+
 # Cloudflare
 worker/node_modules/
 worker/.wrangler/
