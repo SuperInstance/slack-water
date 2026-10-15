@@ -24,3 +24,6 @@ worker/.dev.vars
 # OS
 .DS_Store
 Thumbs.db
+
+# Agent scratch files
+pipeline/bathy/.bathy-run.*

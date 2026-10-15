@@ -9,7 +9,13 @@
 	result is computed here, on the server, from the shared simulation.
 
 	That matters because the ocean is shared. If a modified client could write to
-	a stock, one player could drain a fishery for everyone.
+	a stock, one player could drain a fishery for everyone else.
+
+	A successful catch does one more thing here: it enters the player's wallet
+	hold (WalletService.recordCatch) and the result carries the catch's id and
+	a quote in integer cents. The fish is held server-side from the instant it
+	lands; selling it later is a WalletService concern, priced against the
+	live market then — never against anything the client sends.
 ]]
 
 local Players = game:GetService("Players")
@@ -21,8 +27,10 @@ local Species = require(Shared.Species)
 local OceanSim = require(Shared.Ocean.OceanSim)
 local Config = require(Shared.Config)
 local Progression = require(Shared.Progression)
+local Wallet = require(Shared.Wallet)
 local OceanService = require(script.Parent.OceanService)
 local ProfileService = require(script.Parent.ProfileService)
+local WalletService = require(script.Parent.Wallet)
 
 local CastService = {}
 
@@ -74,6 +82,7 @@ function CastService.start(): ()
 	local svc = OceanService.start()
 	local remotes = svc.remotes
 	local profiles = ProfileService.start()
+	local wallets = WalletService.start()
 
 	remotes[Types.CastRequest].OnServerEvent:Connect(function(player: any, payload: any)
 		if typeof(payload) ~= "table" then
@@ -202,9 +211,18 @@ function CastService.start(): ()
 		end
 
 		local rng = svc.rng
-		local performance = math.clamp(payload.performance, 0.0, 1.0)
+		-- `performance` is sent by the fight minigame but is not guaranteed —
+		-- a payload matching only CastRequestPayload's other fields must not
+		-- crash the handler. A missing/garbage roll degrades to a middling
+		-- fight rather than an error inside OnServerEvent.
+		local performance = math.clamp(tonumber(payload.performance) or 0.5, 0.0, 1.0)
 		local weightKg = rollWeight(species, performance, rng)
-		local value = math.floor(result.yielded * svc.market.entries[species.id].price / 10)
+		local price = svc.market.entries[species.id].price
+		local value = math.floor(result.yielded * price / 10)
+		-- the authoritative quote, in integer cents, through the wallet's one
+		-- float->int boundary. A sale is priced again at sale time; this is
+		-- what the card may show the player while they decide.
+		local valueCents = Wallet.saleCents(price, result.yielded)
 
 		local inRun = species.anadromous and Species.isRunning(species, svc.ocean.month)
 
@@ -229,6 +247,22 @@ function CastService.start(): ()
 			end
 		end
 
+		-- The fish enters the wallet hold NOW, not when the player chooses:
+		-- a crash between the cast and the decision must not silently eat a
+		-- fish the ocean has already written off. Selling later (from the
+		-- catch card or the market panel) converts it at whatever the market
+		-- pays then; keeping it just leaves it in the hold. Either way the
+		-- stock was deducted exactly once, above, inside OceanService.harvest
+		-- — a sale never touches the ocean again. Wallet.recordCatch refuses
+		-- a zero-biomass catch (harvest's ok-with-nothing path), in which
+		-- case nothing is held and no id or quote is sent.
+		local heldCatch = WalletService.recordCatch(wallets, player, {
+			speciesId = species.id,
+			regionId = regionId,
+			weightKg = weightKg,
+			yielded = result.yielded,
+		})
+
 		remotes[Types.CastResult]:FireClient(player, {
 			ok = true,
 			speciesId = speciesId,
@@ -241,6 +275,8 @@ function CastService.start(): ()
 			contested = result.contested,
 			weightKg = weightKg,
 			value = value,
+			valueCents = if heldCatch then valueCents else nil,
+			catchId = if heldCatch then heldCatch.catchId else nil,
 			rare = rollRare(species, result.abundanceBefore, performance, rng),
 			inRun = inRun,
 			tideQuality = result.tideQuality or 0,

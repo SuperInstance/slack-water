@@ -2,16 +2,22 @@
 --[[
 	Remotes — the runtime remote registry.
 
-	Types.luau is the wire contract, but it is owned by a separate change, so
-	remotes that progression needs TODAY are created here instead. Everything
-	in this file is a pending Types.luau addition, deliberately kept in one
-	place so folding it into the contract later is a copy, not a hunt:
+	Types.luau is the wire contract, but the remotes OceanService itself
+	creates are only the six it bootstraps. Two sets live here instead:
 
-	  Types.GearRequest = "GearRequest"  -- client -> server: work different gear
-	  Types.ProfileSync  = "ProfileSync"  -- server -> client: that player's profile
+	1. Remotes progression needs TODAY, still pending their Types.luau fold
+	   (that fold belongs to the progression change, not this one):
 
-	The payload shapes they carry are documented in ProfileService.server.luau
-	and GearBar.client.luau respectively.
+	     Types.GearRequest = "GearRequest"  -- client -> server: work different gear
+	     Types.ProfileSync  = "ProfileSync"  -- server -> client: that player's profile
+
+	   The payload shapes they carry are documented in ProfileService.luau
+	   and GearBar.client.luau respectively.
+
+	2. The wallet remotes. These ARE in the contract (Types.luau declares
+	   SellRequest / SellResult / WalletSync); they are created here because
+	   the other creation site, OceanService.buildRemotes, is not this
+	   change's to edit. Once it folds them in, this half of the list can go.
 
 	build() is idempotent and mirrors OceanService's own remote bootstrap
 	(same folder, same find-or-create), so the two can run in either order
@@ -29,8 +35,13 @@ local Remotes = {}
 Remotes.GearRequest = "GearRequest"
 Remotes.ProfileSync = "ProfileSync"
 
---- Find-or-create the shared remotes folder and the progression remotes in
---- it. Returns a name -> RemoteEvent map in the same shape as
+-- Contract-declared wallet remotes; see the module header.
+Remotes.SellRequest = Types.SellRequest
+Remotes.SellResult = Types.SellResult
+Remotes.WalletSync = Types.WalletSync
+
+--- Find-or-create the shared remotes folder and the remotes registered here
+--- in it. Returns a name -> RemoteEvent map in the same shape as
 --- OceanService's `svc.remotes`, so callers can index it identically.
 function Remotes.build(): { [string]: any }
 	local folder = ReplicatedStorage:FindFirstChild(Types.REMOTE_FOLDER)
@@ -44,6 +55,9 @@ function Remotes.build(): { [string]: any }
 	local names = {
 		Remotes.GearRequest,
 		Remotes.ProfileSync,
+		Remotes.SellRequest,
+		Remotes.SellResult,
+		Remotes.WalletSync,
 	}
 
 	for _, name in names do

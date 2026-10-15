@@ -27,6 +27,9 @@ Types.OceanSync = "OceanSync" -- server -> client: periodic world state broadcas
 Types.MarketSync = "MarketSync" -- server -> client: price list
 Types.RegionDiscovered = "RegionDiscovered" -- server -> client: a newly composed bank
 Types.Notify = "Notify" -- server -> client: a one-line toast
+Types.SellRequest = "SellRequest" -- client -> server: sell one held catch
+Types.SellResult = "SellResult" -- server -> client: outcome of a sale
+Types.WalletSync = "WalletSync" -- server -> client: authoritative balance + hold
 
 Types.REMOTE_FOLDER = "Remotes"
 
@@ -40,6 +43,10 @@ export type CastRequestPayload = {
 	speciesId: string,
 	effort: number, -- gear/skill term; server clamps and re-derives everything else
 	depth: number, -- where the player dropped the line, within the species' band
+	-- how well the fight minigame went, 0..1. Sent by Casting; the server
+	-- clamps it and defaults to a mid roll when absent, so a payload that
+	-- matches only the fields above still resolves instead of throwing.
+	performance: number,
 }
 
 --- server -> client
@@ -69,6 +76,15 @@ export type CastResultPayload = {
 	-- UI connect cause and effect: "you fought it at slack water" is a much
 	-- better moment than a bare number.
 	tideQuality: number,
+
+	-- Set only when ok == true. The catch is in the server-side hold from the
+	-- moment it lands; this id is the ONLY thing a sell request may send
+	-- about it.
+	catchId: string?,
+	-- the catch's worth in integer cents at the moment of the cast — a quote,
+	-- not a payment. The price actually paid is computed at sale time and
+	-- arrives in SellResultPayload.paidCents.
+	valueCents: number?,
 }
 
 --- server -> client, on every OceanSync
@@ -153,6 +169,47 @@ export type NotifyPayload = {
 	text: string,
 	speciesId: string?,
 	regionId: string?,
+}
+
+--=============================================================================
+-- Wallet
+--
+-- The sell channel carries intent and nothing else. A sale request is ONE
+-- server-minted catchId — no species, no quantity, and above all no price.
+-- Everything a modified client might want to claim about a fish is absent
+-- from the wire, so it cannot be claimed. The server prices the sale from
+-- the live market at the moment it processes the request; a stale price is
+-- therefore not a case to handle, it is a case that cannot exist.
+--=============================================================================
+
+--- client -> server
+export type SellRequestPayload = {
+	catchId: string,
+}
+
+--- server -> client
+export type SellResultPayload = {
+	ok: boolean,
+	reason: string?, -- set when ok == false
+	catchId: string,
+	speciesId: string?, -- the fish the server says this id was
+	paidCents: number, -- what the sale actually paid — always server-derived
+	balanceCents: number, -- the authoritative balance after this sale
+}
+
+--- server -> client, on change and on join
+export type WalletSyncPayload = {
+	balanceCents: number,
+	hold: { WalletHoldEntry },
+}
+
+--- One fish in the hold, as the client may see it: identity and weight.
+--- No yielded, no price — the wire never carries enough to value a fish
+--- client-side (house rule 2).
+export type WalletHoldEntry = {
+	catchId: string,
+	speciesId: string,
+	weightKg: number,
 }
 
 --=============================================================================

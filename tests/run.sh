@@ -18,6 +18,40 @@ for suite in tests/run-tests.luau tests/economy-tests.luau tests/tide-chart-test
   fi
 done
 
+# The cast-loop suite executes the real client scripts under a fake client
+# engine, so it needs its sources fed in as (path, contents) program
+# arguments — same technique as the boot and wallet suites below.
+echo ""
+echo "########## tests/cast-loop-tests.luau (with client sources fed in) ##########"
+cast_args=()
+for f in src/Client/Ui.luau src/Client/CastBar.client.luau src/Client/Casting.client.luau \
+  src/Client/HUD.client.luau src/Shared/Types.luau src/Shared/Species.luau \
+  src/Shared/Config.luau src/Shared/Tide.luau; do
+  cast_args+=("$f" "$(cat "$f")")
+done
+if luau tests/cast-loop-tests.luau -a "${cast_args[@]}"; then
+  echo "-> tests/cast-loop-tests.luau PASSED"
+else
+  echo "-> tests/cast-loop-tests.luau FAILED"
+  status=1
+fi
+
+# The wallet suite drives the real server path (CastService -> WalletService)
+# under the fake Roblox engine, so like the boot test it needs its sources fed
+# in as (path, contents) program arguments.
+echo ""
+echo "########## tests/wallet-tests.luau ##########"
+wallet_args=()
+while IFS= read -r f; do
+  wallet_args+=("$f" "$(cat "$f")")
+done < <(find src/Server src/Shared -name '*.luau' | sort)
+if [ "${#wallet_args[@]}" -gt 0 ] && luau tests/wallet-tests.luau -a "${wallet_args[@]}"; then
+  echo "-> tests/wallet-tests.luau PASSED"
+else
+  echo "-> tests/wallet-tests.luau FAILED"
+  status=1
+fi
+
 # The boot smoke test needs its wrapper: the luau CLI has no file I/O, so
 # run-boot.sh feeds the server and shared sources in as program arguments.
 echo ""

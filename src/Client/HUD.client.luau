@@ -60,6 +60,7 @@ local function main(): ()
 
 	local regionNames: { [string]: string } = {}
 	local currentRegionId: string? = nil
+	local regionPlanned = false -- selected in the CastBar, not yet fished
 	local earnedTotal = 0
 	local catchCount = 0
 	local isSharedOcean = false
@@ -178,12 +179,35 @@ local function main(): ()
 		-- even a failed cast tells us where the player is working
 		if type(p.regionId) == "string" and p.regionId ~= "" then
 			currentRegionId = p.regionId
+			regionPlanned = false
 		end
 		if p.ok == true then
 			earnedTotal += Ui.tonum(p.value, 0)
 			catchCount += 1
 		end
 	end
+
+	-- The CastBar publishes the ground the player has rigged for; until the
+	-- first cast says where they actually are, the honest answer is where
+	-- they are headed. (CastBar -> HUD traffic on the bus Casting publishes;
+	-- see docs/CASTING.md.)
+	task.spawn(function()
+		local bus = playerGui:WaitForChild("SlackWaterCastBus", 10)
+		if bus and bus:IsA("BindableEvent") then
+			Ui.connect(connections, (bus :: BindableEvent).Event, function(msg: any)
+				if typeof(msg) ~= "table" or msg.kind ~= "selection" then
+					return
+				end
+				if type(msg.regionId) == "string" and msg.regionId ~= "" then
+					currentRegionId = msg.regionId
+					regionPlanned = true
+					if type(msg.regionName) == "string" and #msg.regionName > 0 then
+						regionNames[msg.regionId] = msg.regionName
+					end
+				end
+			end)
+		end
+	end)
 
 	-- Remotes appear when the server builds them. Retry gently instead of
 	-- yielding forever so a missing remote leaves the "reading the chart"
@@ -265,7 +289,8 @@ local function main(): ()
 			string.format("%s · day %d/%d", monthName, clock.day, Config.DAYS_PER_MONTH)
 
 		if currentRegionId then
-			regionLabel.Text = regionNames[currentRegionId] or currentRegionId
+			local name = regionNames[currentRegionId] or currentRegionId
+			regionLabel.Text = if regionPlanned then "bound for " .. name else name
 			regionLabel.TextColor3 = Ui.color("text")
 		else
 			regionLabel.Text = "no ground chosen"

@@ -52,7 +52,6 @@ local UserInputService = game:GetService("UserInputService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Types = require(Shared.Types)
 local Species = require(Shared.Species)
-local Config = require(Shared.Config)
 
 --=============================================================================
 -- Tuning
@@ -444,6 +443,12 @@ end
 -- Server round trip
 --=============================================================================
 
+-- Seconds to wait for the server's CastResult before declaring the landing
+-- unresolved. The round trip is normally well under a second; anything past
+-- this is a dropped request (the server's rate limiter replies to nothing),
+-- and a fight that never ends would block the player from ever casting again.
+local RESOLVE_TIMEOUT = 12
+
 --- Send the catch and resolve with whatever the server says.
 ---
 --- Deliberately fire-and-await rather than optimistic: the client has no idea
@@ -488,6 +493,19 @@ function Casting._resolveOnServer(casting: Casting, performance: number): ()
 		depth = casting.depth,
 		performance = performance,
 	})
+
+	-- Never wait forever. A cast the server silently dropped (rate limit,
+	-- dead handler) still has to end, or the player is locked out of the
+	-- game's only verb.
+	task.delay(RESOLVE_TIMEOUT, function()
+		if casting.state == "waiting" and token == casting._castToken then
+			casting.state = "lost"
+			setHolding(casting, false)
+			Casting._emit(casting, "lost", {
+				reason = "The landing never resolved — no answer from the shore.",
+			})
+		end
+	end)
 end
 
 --=============================================================================
@@ -515,5 +533,93 @@ function Casting.beginAuto(casting: Casting, regionId: string, speciesId: string
 end
 
 Casting._FIGHT = FIGHT
+
+--=============================================================================
+-- Boot — the way in
+--
+-- Rojo maps this file as a LocalScript, and LocalScripts cannot be required
+-- by their siblings, so `Casting.start()` used to be a function no other
+-- script could reach: the whole fishing loop was built and unplayable
+-- (docs/PLAYLOOP.md, defect 1).
+--
+-- In Studio this file RUNS, so it boots itself and publishes the rendezvous
+-- the other client scripts drive it through: a BindableEvent in PlayerGui.
+-- That single named instance is the whole contract between LocalScripts —
+-- exact message shapes are pinned in docs/CASTING.md.
+--=============================================================================
+
+local BUS_NAME = "SlackWaterCastBus"
+
+if game ~= nil then
+	local player = game:GetService("Players").LocalPlayer
+	if player then
+		local playerGui = player:WaitForChild("PlayerGui")
+		local bus = playerGui:FindFirstChild(BUS_NAME) :: BindableEvent?
+		if not bus then
+			local event = Instance.new("BindableEvent")
+			event.Name = BUS_NAME
+			event.Parent = playerGui
+			bus = event
+		end
+
+		local casting = Casting.start()
+
+		local function reply(eventName: string, data: any)
+			bus:Fire({ kind = "fight", event = eventName, data = data })
+		end
+
+		for _, eventName in { "begin", "update", "landed", "lost", "result", "cancel" } do
+			Casting.on(casting, eventName, function(data: any)
+				reply(eventName, data)
+			end)
+		end
+
+		bus.Event:Connect(function(msg: any)
+			if typeof(msg) ~= "table" then
+				return
+			end
+
+			if msg.kind == "cast" then
+				-- One line in the water at a time: a cast already running must
+				-- not be joined by a second. This is the server-facing half of
+				-- the double-cast guard; the CastBar owns the button half.
+				if casting.state == "fighting" or casting.state == "waiting" then
+					return
+				end
+
+				local regionId = msg.regionId
+				local speciesId = msg.speciesId
+				local depth = msg.depth
+				if type(depth) ~= "number" then
+					depth = nil -- nil = mid-band, the informed default
+				end
+				if type(regionId) ~= "string" or type(speciesId) ~= "string" then
+					reply("error", { reason = "That cast never went out." })
+					return
+				end
+
+				if not Casting.beginFight(casting, regionId, speciesId, depth) then
+					reply("error", { reason = "That fish is not in these waters." })
+					return
+				end
+
+				if casting._connection then
+					casting._connection:Disconnect()
+					casting._connection = nil
+				end
+				casting._connection = RunService.Heartbeat:Connect(function(dt: number)
+					Casting.update(casting, dt)
+					if casting.state ~= "fighting" and casting.state ~= "waiting" then
+						casting._connection:Disconnect()
+						casting._connection = nil
+					end
+				end)
+			elseif msg.kind == "abort" then
+				Casting.cancel(casting)
+			end
+			-- "selection" messages are CastBar -> HUD traffic, not for us.
+		end)
+	end
+end
 
 return Casting

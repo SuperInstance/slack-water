@@ -255,6 +255,37 @@ suite("worldgen — a player can stand in this world", function()
 		assertTrue(floor.CFrame.Y < 0, "SeaFloor should sit below the water line")
 	end)
 
+	test("there is actually water on the ocean", function()
+		-- This is the assertion that was missing when the game shipped with no
+		-- water at all. The checks above could all pass on a world with a
+		-- boat, a spawn, a floor and ground discs — which is exactly what a
+		-- player would see and reasonably describe as "a blank slate".
+		--
+		-- Without this, "the water renders" was only ever verifiable by a human
+		-- pressing Play and looking. Now it is a test.
+		local surface = oceanFolder:FindFirstChild("Surface")
+		assertTrue(
+			surface ~= nil,
+			"no Surface folder — OceanSurface never built. The ocean has no water."
+		)
+
+		local tiles = surface:GetChildren()
+		assertTrue(
+			#tiles > 1,
+			"Surface has " .. tostring(#tiles) .. " children; a sea needs more than that"
+		)
+
+		-- Every tile must be finite and at a sane depth, or the player is
+		-- looking at NaN geometry.
+		for _, tile in tiles do
+			local y = tile.CFrame.Y
+			assertTrue(
+				y == y and y > -400 and y < 100,
+				"a water tile has an insane Y (" .. tostring(y) .. ")"
+			)
+		end
+	end)
+
 	test("one marker model per simulated region", function()
 		local markers = markerModels(oceanFolder)
 		assertEq(
