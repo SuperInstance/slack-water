@@ -123,7 +123,7 @@ local function effectiveCapacity(species: any, region: Region, month: number): n
 		bonus = bonus + (Config.IDEAL_CAPACITY_BONUS - 1.0)
 	end
 
-	if species.anadromous and Species.isRunning(species, month) then
+	if species.runMonths and Species.isRunning(species, month) then
 		local strength = species.runStrength or 1.0
 		bonus = bonus + Config.RUN_CAPACITY_BONUS * strength
 	end
@@ -251,9 +251,19 @@ function OceanSim.tick(ocean: Ocean, rng: Rng.Rng): ()
 				growth = growth * Config.COLLAPSE_RECOVERY_PENALTY
 			end
 
-			-- anadromous run inflow
+			-- Seasonal run inflow.
+			--
+			-- Gated on `runMonths`, NOT on `anadromous`. Those are different
+			-- facts and conflating them silently killed a feature: Pacific
+			-- herring aggregate to spawn in spring but do not return to
+			-- freshwater, so they are `anadromous = false` with a run window —
+			-- and an `anadromous` gate meant the spring herring run never fired
+			-- once, for the life of the game.
+			--
+			-- `anadromous` stays on the species record as biology. `runMonths`
+			-- is the mechanic.
 			local inflow = 0.0
-			if species.anadromous and Species.isRunning(species, ocean.month) then
+			if species.runMonths and Species.isRunning(species, ocean.month) then
 				local strength = species.runStrength or 1.0
 				-- arrival is noisy per region so two players fishing the same
 				-- species in different places do not see identical numbers

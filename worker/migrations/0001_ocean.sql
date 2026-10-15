@@ -221,7 +221,12 @@ FROM (
       * (CASE WHEN r.depth >= sp.min_depth AND r.depth <= sp.max_depth THEN 1.0 ELSE 0.15 END)
       * (1.0
          + CASE WHEN ha.affinity * (CASE WHEN r.depth >= sp.min_depth AND r.depth <= sp.max_depth THEN 1.0 ELSE 0.15 END) >= 0.95 THEN 0.35 ELSE 0.0 END
-         + CASE WHEN sp.anadromous = 1 AND EXISTS (
+         -- Gated on the PRESENCE OF A RUN WINDOW, not on `anadromous`.
+         -- Pacific herring aggregate to spawn in spring but never return to
+         -- freshwater, so they carry run months with anadromous = 0. Gating on
+         -- anadromous meant their spring run never fired. Keep this in step
+         -- with OceanSim.luau effectiveCapacity and worker/src/ocean.ts.
+         + CASE WHEN EXISTS (
              SELECT 1 FROM species_run_months m WHERE m.species_id = sp.id AND m.month = 1
            ) THEN 0.85 * sp.run_strength ELSE 0.0 END) AS cap
   FROM regions r

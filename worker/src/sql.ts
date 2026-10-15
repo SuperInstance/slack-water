@@ -111,7 +111,11 @@ export const TICK_SQL = `WITH gated AS (
     sp.base_capacity * r.richness
       * ha.affinity
       * (CASE WHEN r.depth >= sp.min_depth AND r.depth <= sp.max_depth THEN 1.0 ELSE 0.15 END) AS scaled_base,
-    CASE WHEN sp.anadromous = 1 AND EXISTS (
+    -- Gate on the PRESENCE OF A RUN WINDOW, not on the anadromous column.
+    -- Pacific herring aggregate to spawn in spring but never return to
+    -- freshwater, so they carry run months with anadromous = 0; an anadromous
+    -- gate meant their run never fired. Mirrors OceanSim.luau.
+    CASE WHEN EXISTS (
       SELECT 1 FROM species_run_months m WHERE m.species_id = sp.id AND m.month = ?1
     ) THEN 1 ELSE 0 END AS running
   FROM region_stocks rs
@@ -195,7 +199,7 @@ FROM (
       * (CASE WHEN r.depth >= sp.min_depth AND r.depth <= sp.max_depth THEN 1.0 ELSE 0.15 END)
       * (1.0
          + CASE WHEN ha.affinity * (CASE WHEN r.depth >= sp.min_depth AND r.depth <= sp.max_depth THEN 1.0 ELSE 0.15 END) >= 0.95 THEN ?2 ELSE 0.0 END
-         + CASE WHEN sp.anadromous = 1 AND EXISTS (
+         + CASE WHEN EXISTS (
              SELECT 1 FROM species_run_months m WHERE m.species_id = sp.id AND m.month = ?3
            ) THEN ?4 * sp.run_strength ELSE 0.0 END) AS cap
   FROM species sp

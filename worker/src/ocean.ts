@@ -52,7 +52,7 @@ export function habitatAffinity(speciesHabitat: Habitat, regionHabitat: Habitat)
 /**
  * A species' effective carrying capacity in a region: baseline capacity,
  * scaled by richness, habitat affinity, a depth-band gate, and (for
- * anadromous species) the run bonus while the run is on.
+ * any species with a run window) the run bonus while the run is on.
  */
 export function effectiveCapacity(
 	species: Species,
@@ -73,7 +73,7 @@ export function effectiveCapacity(
 	if (affinity >= 0.95) {
 		bonus += CONFIG.IDEAL_CAPACITY_BONUS - 1.0;
 	}
-	if (species.anadromous && isRunning(species, month)) {
+	if (species.runMonths && isRunning(species, month)) {
 		bonus += CONFIG.RUN_CAPACITY_BONUS * species.runStrength;
 	}
 
@@ -82,7 +82,7 @@ export function effectiveCapacity(
 
 /**
  * One tick of the population model for a single (region, species) stock:
- * logistic growth, a collapse-recovery penalty, anadromous run inflow, the
+ * logistic growth, a collapse-recovery penalty, seasonal run inflow, the
  * extirpation floor, and the 1.15·K overshoot clamp — in the same order as
  * OceanSim.tick so the two cannot drift.
  *
@@ -106,7 +106,7 @@ export function tickStock(
 	}
 
 	let inflow = 0;
-	if (species.anadromous && isRunning(species, month)) {
+	if (species.runMonths && isRunning(species, month)) {
 		inflow =
 			cap * CONFIG.RUN_CAPACITY_BONUS * species.runStrength * 0.35 * runJitter;
 	}

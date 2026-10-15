@@ -293,7 +293,78 @@ suite("OceanSim — population dynamics", function()
 		assertTrue(duringRun > preRun, "run should add biomass: " .. tostring(preRun) .. " -> " .. tostring(duringRun))
 	end)
 
-	test("the whole simulation is deterministic", function()
+	test("a run window fires regardless of anadromy", function()
+		-- Pacific herring aggregate to spawn in spring but do not return to
+		-- freshwater, so they are `anadromous = false` with a run window. An
+		-- `anadromous` gate meant the spring herring run never fired. The
+		-- mechanic is `runMonths`; `anadromous` is only biology.
+		local herring = Species.get("herring")
+		assertTrue(herring ~= nil, "herring missing")
+		assertFalse(herring.anadromous, "herring are not anadromous")
+		assertTrue(herring.runMonths ~= nil, "herring should have a run window")
+
+		local ocean = newOcean(77)
+		OceanSim.addRegion(ocean, makeRegion("kelpRegion", "kelp", 40, 1.0))
+		local rng = Rng.new(77)
+
+		ocean.month = 1
+		for _ = 1, 12 do
+			OceanSim.tick(ocean, rng)
+		end
+		local outOfRun = OceanSim.getStock(ocean, "kelpRegion", "herring")
+
+		ocean.month = 4
+		for _ = 1, 12 do
+			OceanSim.tick(ocean, rng)
+		end
+		local inRun = OceanSim.getStock(ocean, "kelpRegion", "herring")
+
+		assertTrue(inRun > outOfRun, "the herring run should add biomass: " .. tostring(outOfRun) .. " -> " .. tostring(inRun))
+	end)
+
+	test("every species with a run window actually produces inflow", function()
+		-- Sweeps the whole roster: for any species declaring runMonths, ticking
+		-- inside its window must raise biomass versus ticking outside it.
+		for _, species in Species.list do
+			if species.runMonths then
+				local ocean = newOcean(31)
+				OceanSim.addRegion(ocean, makeRegion("r1", species.habitat, 50, 1.0))
+				local rng = Rng.new(31)
+
+				local first = species.runMonths[1] :: number
+
+				-- Pick a month that is definitely OUTSIDE the run window.
+				-- Arithmetic like `first % 12 + 1` is not enough: for chinook
+				-- that lands on 4, which is also in the run.
+				local outside: number? = nil
+				for month = 1, Config.MONTHS_PER_YEAR do
+					if not Species.isRunning(species, month) then
+						outside = month
+						break
+					end
+				end
+				assertTrue(outside ~= nil, species.id .. " is running all year; nothing to compare against")
+				ocean.month = outside :: number
+				for _ = 1, 12 do
+					OceanSim.tick(ocean, rng)
+				end
+				local before = OceanSim.getStock(ocean, "r1", species.id)
+
+				ocean.month = first
+				for _ = 1, 12 do
+					OceanSim.tick(ocean, rng)
+				end
+				local after = OceanSim.getStock(ocean, "r1", species.id)
+
+				assertTrue(
+					after > before,
+					species.id .. " declares a run window but its run does not add biomass"
+				)
+			end
+		end
+	end)
+
+test("the whole simulation is deterministic", function()
 		local function run(): { number }
 			local ocean = newOcean(777)
 			OceanSim.addRegion(ocean, makeRegion("a", "reef", 60, 1.0))
