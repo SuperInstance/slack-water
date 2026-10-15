@@ -281,7 +281,7 @@ local function main(): ()
 			local t = base + (i - 0.5) / BAR_COUNT * WINDOW_HOURS
 			local norm = (heights[i] - lo) / span
 			local bar = bars[i]
-			bar.Size = UDim2.new(0.7 / BAR_COUNT, 0, 0.12 + 0.82 * norm, 0)
+			bar.Size = UDim2.fromScale(0.7 / BAR_COUNT, 0.12 + 0.82 * norm)
 			if Tide.isSlack(t) then
 				bar.BackgroundColor3 = Ui.color("gold")
 				bar.BackgroundTransparency = 0.05

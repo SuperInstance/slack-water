@@ -131,7 +131,7 @@ local function main(): ()
 			text = REASON_TEXT[reason or ""] or (reason or "The cast came back empty."),
 			textSize = 12,
 			color = "dim",
-			size = UDim2.new(1, 0, 0, 16),
+			size = UDim2.new(1, 0, 0, 30),
 			wrapped = true,
 			xalign = Enum.TextXAlignment.Center,
 		})
@@ -262,7 +262,7 @@ local function main(): ()
 			textSize = 9,
 			font = Enum.Font.GothamBold,
 			color = if p.depleted then "danger" else "dim",
-			pos = UDim2.new(1, 0, 0, 0),
+			pos = UDim2.fromScale(1, 0),
 			anchor = Vector2.new(1, 0),
 			xalign = Enum.TextXAlignment.Right,
 		})
@@ -276,7 +276,7 @@ local function main(): ()
 		Ui.frame(meter.track, {
 			name = "Before",
 			size = UDim2.new(0, 2, 1, 0),
-			pos = UDim2.new(math.clamp(p.abundanceBefore or 0, 0, 1), 0, 0, 0),
+			pos = UDim2.fromScale(math.clamp(p.abundanceBefore or 0, 0, 1), 0),
 			anchor = Vector2.new(0.5, 0),
 			color = "white",
 			transparency = 0.35,
@@ -306,7 +306,7 @@ local function main(): ()
 		-- a thumb
 		local overlay = Ui.button(card, {
 			name = "Dismiss",
-			size = UDim2.new(1, 0, 1, 0),
+			size = UDim2.fromScale(1, 1),
 			pos = UDim2.fromScale(0, 0),
 			transparency = 1,
 			zindex = 30,

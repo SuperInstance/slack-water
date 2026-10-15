@@ -145,7 +145,7 @@ function Ui.frame(parent: Instance, props: FrameProps): Frame
 	f.BackgroundTransparency = props.transparency or 0
 	f.BackgroundColor3 = Ui.color(props.color or "panel")
 	f.BorderSizePixel = 0
-	f.Size = props.size or UDim2.new(1, 0, 1, 0)
+	f.Size = props.size or UDim2.fromScale(1, 1)
 	f.Position = props.pos or UDim2.new(0, 0, 0, 0)
 	if props.anchor then
 		f.AnchorPoint = props.anchor
@@ -207,7 +207,7 @@ function Ui.label(parent: Instance, props: LabelProps): TextLabel
 	l.TextWrapped = props.wrapped or false
 	l.TextTruncate = Enum.TextTruncate.AtEnd
 	l.RichText = props.rich or false
-	l.Size = props.size or UDim2.new(1, 0, 1, 0)
+	l.Size = props.size or UDim2.fromScale(1, 1)
 	l.Position = props.pos or UDim2.new(0, 0, 0, 0)
 	if props.anchor then
 		l.AnchorPoint = props.anchor
@@ -255,7 +255,7 @@ function Ui.button(parent: Instance, props: ButtonProps): TextButton
 	b.BackgroundTransparency = props.transparency or 0
 	b.BorderSizePixel = 0
 	b.AutoButtonColor = true
-	b.Size = props.size or UDim2.new(1, 0, 1, 0)
+	b.Size = props.size or UDim2.fromScale(1, 1)
 	b.Position = props.pos or UDim2.new(0, 0, 0, 0)
 	if props.anchor then
 		b.AnchorPoint = props.anchor
@@ -284,7 +284,7 @@ function Ui.meter(parent: Instance, fillColor: string, props: FrameProps): Meter
 	track.Name = props.name or "Meter"
 	local fill = Ui.frame(track, {
 		name = "Fill",
-		size = UDim2.new(0, 0, 1, 0),
+		size = UDim2.fromScale(0, 1),
 		color = fillColor,
 		corner = if props.corner then props.corner else nil,
 		zindex = props.zindex,
@@ -293,7 +293,7 @@ function Ui.meter(parent: Instance, fillColor: string, props: FrameProps): Meter
 end
 
 function Ui.setMeter(meter: Meter, fraction: number): ()
-	meter.fill.Size = UDim2.new(math.clamp(fraction, 0, 1), 0, 1, 0)
+	meter.fill.Size = UDim2.fromScale(math.clamp(fraction, 0, 1), 1)
 end
 
 --- Small coloured badge (SCARCE, RISING, REEF...). Auto-width so the text
@@ -301,7 +301,7 @@ end
 function Ui.chip(parent: Instance, text: string, colorName: string, props: FrameProps): Frame
 	local chip = Ui.frame(parent, {
 		name = props.name or "Chip",
-		size = UDim2.new(0, 0, 0, 16),
+		size = UDim2.fromOffset(0, 16),
 		pos = props.pos,
 		anchor = props.anchor,
 		color = colorName,
@@ -316,7 +316,16 @@ function Ui.chip(parent: Instance, text: string, colorName: string, props: Frame
 	pad.PaddingLeft = UDim.new(0, 6)
 	pad.PaddingRight = UDim.new(0, 6)
 	pad.Parent = chip
-	Ui.label(chip, { text = text, color = colorName, textSize = 10, font = Enum.Font.GothamBold })
+	-- the label must grow to its own text first; a scale-sized label
+	-- contributes no width, and the chip's AutomaticSize would collapse
+	local chipText = Ui.label(chip, {
+		text = text,
+		color = colorName,
+		textSize = 10,
+		font = Enum.Font.GothamBold,
+		size = UDim2.fromScale(0, 1),
+	})
+	chipText.AutomaticSize = Enum.AutomaticSize.X
 	return chip
 end
 
@@ -326,7 +335,7 @@ function Ui.scroll(parent: Instance, props: FrameProps): ScrollingFrame
 	s.Name = props.name or "Scroll"
 	s.BackgroundTransparency = 1
 	s.BorderSizePixel = 0
-	s.Size = props.size or UDim2.new(1, 0, 1, 0)
+	s.Size = props.size or UDim2.fromScale(1, 1)
 	s.Position = props.pos or UDim2.new(0, 0, 0, 0)
 	s.CanvasSize = UDim2.new(0, 0, 0, 0)
 	s.AutomaticCanvasSize = Enum.AutomaticSize.Y
@@ -564,7 +573,7 @@ function Ui.makeSheet(opts: {
 		text = opts.icon,
 		textSize = 20,
 		size = UDim2.new(1, 0, 0, 24),
-		pos = UDim2.new(0, 0, 0, 6),
+		pos = UDim2.fromOffset(0, 6),
 		yalign = Enum.TextYAlignment.Center,
 		xalign = Enum.TextXAlignment.Center,
 	})
@@ -608,7 +617,7 @@ function Ui.makeSheet(opts: {
 		textSize = 10,
 		color = "dim",
 		size = UDim2.new(1, 0, 0, 14),
-		pos = UDim2.new(0, 0, 0, 22),
+		pos = UDim2.fromOffset(0, 22),
 	})
 
 	local close = Ui.button(frame, {
@@ -617,7 +626,7 @@ function Ui.makeSheet(opts: {
 		textSize = 14,
 		textColor = "dim",
 		size = UDim2.fromOffset(26, 26),
-		pos = UDim2.new(1, 0, 0, 0),
+		pos = UDim2.fromScale(1, 0),
 		anchor = Vector2.new(1, 0),
 		bgColor = "deep",
 		transparency = 0.2,
@@ -629,7 +638,7 @@ function Ui.makeSheet(opts: {
 	local body = Ui.frame(frame, {
 		name = "Body",
 		size = UDim2.new(1, 0, 1, -48),
-		pos = UDim2.new(0, 0, 0, 40),
+		pos = UDim2.fromOffset(0, 40),
 		transparency = 1,
 		zindex = 5,
 	})

@@ -60,7 +60,7 @@ local function main(): ()
 		yScale = 0.58,
 	})
 
-	local scroll = Ui.scroll(sheet.body, { name = "Rows", size = UDim2.new(1, 0, 1, 0) })
+	local scroll = Ui.scroll(sheet.body, { name = "Rows", size = UDim2.fromScale(1, 1) })
 	local emptyLabel = Ui.label(scroll, {
 		text = "reading the grounds…",
 		color = "dim",

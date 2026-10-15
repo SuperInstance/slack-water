@@ -49,7 +49,7 @@ local function main(): ()
 		yScale = 0.4,
 	})
 
-	local scroll = Ui.scroll(sheet.body, { name = "Rows", size = UDim2.new(1, 0, 1, 0) })
+	local scroll = Ui.scroll(sheet.body, { name = "Rows", size = UDim2.fromScale(1, 1) })
 	local emptyLabel = Ui.label(scroll, {
 		text = "waiting for the market…",
 		color = "dim",
@@ -71,7 +71,9 @@ local function main(): ()
 		table.clear(rows)
 	end
 
-	local function rebuild(entries: Types.MarketSyncPayload["entries"]): ()
+	-- entries arrive over the wire, so they are typed as `{ any }` exactly like
+	-- the server's own remote handlers; every field read below is guarded
+	local function rebuild(entries: { any }): ()
 		destroyRows()
 
 		if #entries == 0 then
@@ -165,7 +167,7 @@ local function main(): ()
 	-- a hidden panel has no business churning instances every sync.
 	-- ---------------------------------------------------------------------------
 
-	local latest: Types.MarketSyncPayload["entries"] = {}
+	local latest: { any } = {}
 
 	local function onMarketSync(payload: any)
 		if typeof(payload) ~= "table" then
