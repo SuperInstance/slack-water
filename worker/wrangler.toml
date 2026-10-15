@@ -1,0 +1,37 @@
+name = "slack-water"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+# Workers AI binding used by POST /banks/compose to propose new fishing banks.
+# Everything the model returns goes through src/validation.ts before storage.
+[ai]
+binding = "ai"
+
+# KV is a short-TTL read cache (market snapshots). D1 remains the only source
+# of truth for the ocean; a lost KV entry just costs one extra D1 read.
+#
+# Create the namespace and paste its id below:
+#   npx wrangler kv namespace create OCEAN_KV
+[[kv_namespaces]]
+binding = "OCEAN_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# The shared ocean. Every Roblox server reads and harvests against this one
+# database, which is what makes the fishery global rather than per-server.
+#
+# Create the database and paste its id below:
+#   npx wrangler d1 create slack-water-ocean
+[[d1_databases]]
+binding = "DB"
+database_name = "slack-water-ocean"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+# One simulation tick per minute: 12 ticks/day, 4 days/month, 12 months/year
+# (the Config.luau calendar), so a full in-game year takes 9.6 wall-clock hours.
+# The scheduled handler runs the same code as POST /ocean/tick.
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+# Override without editing code, e.g. for a cheaper/faster model.
+AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
