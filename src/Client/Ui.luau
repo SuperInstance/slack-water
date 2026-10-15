@@ -4,9 +4,10 @@
 
 	Every panel script in src/Client builds its interface out of the same small
 	parts, so the game reads as one HUD rather than six unrelated overlays. The
-	kit is deliberately dumb: it creates instances and nothing else. All game
-	knowledge — prices, tides, regions — stays in the panel scripts, which only
-	ever render what the server sent (house rule 2).
+	kit is deliberately dumb: it creates instances, formats numbers and
+	normalizes wire payloads, and nothing else. All game knowledge — prices,
+	tides, regions — stays in the panel scripts, which only ever render what
+	the server sent (house rule 2).
 
 	This module keeps its top level free of Roblox globals (no Color3/UDim2/Enum
 	constants at load time) so `luau src/Client/Ui.luau` runs clean under the
@@ -72,10 +73,24 @@ Ui.MONTHS = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oc
 
 --- 1234567 -> "1,234,567". Catch values get large, and ungrouped digits are
 --- unreadable at a glance on a phone.
+---
+--- The digits come from string.format("%d"), not tostring: tostring goes
+--- scientific at 1e15 ("1e+15"), which the grouping loop below would shred
+--- into "1e,15" on the HUD. NaN and infinities degrade to fixed text rather
+--- than reaching a format string.
 function Ui.formatInt(n: number): string
+	if n ~= n then
+		return "0"
+	end
+	if n == math.huge then
+		return "∞"
+	end
+	if n == -math.huge then
+		return "-∞"
+	end
 	local rounded = math.floor(n + 0.5)
 	local sign = if rounded < 0 then "-" else ""
-	local digits = tostring(math.abs(rounded))
+	local digits = string.format("%d", math.abs(rounded))
 	local grouped = ""
 	while #digits > 3 do
 		grouped = "," .. digits:sub(-3) .. grouped
@@ -87,7 +102,8 @@ end
 --- An absolute game hour as a clock face ("13:40"). "Hour 61.3" is navigator
 --- talk; the HUD speaks to players.
 function Ui.clockFace(hour: number): string
-	local dayHour = hour % 24
+	local h0 = if hour ~= hour then 0 else hour
+	local dayHour = h0 % 24
 	local h = math.floor(dayHour)
 	local m = math.floor((dayHour - h) * 60 + 0.5)
 	if m == 60 then
@@ -103,18 +119,187 @@ end
 --- mm:ss for a countdown in real seconds. Slack windows are short in real
 --- time, so minutes-and-seconds is always the right unit here.
 function Ui.countdown(seconds: number): string
-	local s = math.max(0, math.floor(seconds + 0.5))
+	local s0 = if seconds ~= seconds then 0 else seconds
+	local s = math.max(0, math.floor(s0 + 0.5))
 	return string.format("%d:%02d", math.floor(s / 60), s % 60)
 end
 
 --- Weight the way a deckhand says it: little fish keep their decimals.
 function Ui.formatWeight(kg: number): string
-	if kg >= 100 then
-		return string.format("%.0f kg", kg)
-	elseif kg >= 10 then
-		return string.format("%.1f kg", kg)
+	local k = if kg ~= kg then 0 else math.clamp(kg, 0, 1e6)
+	if k >= 100 then
+		return string.format("%.0f kg", k)
+	elseif k >= 10 then
+		return string.format("%.1f kg", k)
 	end
-	return string.format("%.2f kg", kg)
+	return string.format("%.2f kg", k)
+end
+
+--- Wire values are trusted by no panel: coerce to a finite number or take
+--- the fallback. Strings, bools, nil, NaN and infinities all degrade instead
+--- of reaching a format string or a comparison.
+function Ui.tonum(value: any, fallback: number): number
+	local n = tonumber(value)
+	if n == nil or n ~= n or n == math.huge or n == -math.huge then
+		return fallback
+	end
+	return n
+end
+
+--=============================================================================
+-- Wire normalization
+--
+-- Everything a remote handler receives is untrusted shape until proven
+-- otherwise: a partial payload, a dev fixture fired from the command bar, or
+-- a field renamed on the server only. Each panel funnels its payload through
+-- one of these pure passes so every field read downstream is typed and
+-- finite. Non-table entries are dropped, never guessed at — the client may
+-- not invent values it was not sent (house rule 2).
+--=============================================================================
+
+export type RegionRow = {
+	id: string,
+	name: string,
+	habitat: string,
+	depth: number,
+	chartedDepth: number,
+	species: { string },
+	abundances: { [string]: number },
+	contested: { [string]: boolean },
+	accessible: boolean,
+	waterDepth: number,
+	quality: number,
+	provenance: string,
+}
+
+--- Normalize the `regions` array of an OceanSync. A region without a string
+--- id is dropped; a missing name falls back to the id (never the string
+--- "nil"); an unrecognised provenance downgrades to "grown", mirroring the
+--- rule in Shared/Ocean/Chart.luau so the client can never be talked into
+--- presenting composed water as surveyed.
+function Ui.normalizeRegions(raw: any): { RegionRow }
+	local out: { RegionRow } = {}
+	if typeof(raw) ~= "table" then
+		return out
+	end
+	for _, entry in raw do
+		if typeof(entry) ~= "table" then
+			continue
+		end
+		local id = entry.id
+		if type(id) ~= "string" or #id == 0 then
+			continue
+		end
+
+		local name = entry.name
+		if type(name) ~= "string" or #name == 0 then
+			name = id
+		end
+		local habitat = if type(entry.habitat) == "string" then entry.habitat else ""
+
+		local depth = Ui.tonum(entry.depth, 0)
+		local chartedDepth = Ui.tonum(entry.chartedDepth, depth)
+
+		local species: { string } = {}
+		if typeof(entry.species) == "table" then
+			for _, speciesId in entry.species do
+				if type(speciesId) == "string" and #speciesId > 0 then
+					table.insert(species, speciesId)
+				end
+			end
+		end
+
+		local abundances: { [string]: number } = {}
+		if typeof(entry.abundances) == "table" then
+			for speciesId, value in entry.abundances do
+				if type(speciesId) == "string" then
+					local n = Ui.tonum(value, -1)
+					if n >= 0 then
+						abundances[speciesId] = n
+					end
+				end
+			end
+		end
+
+		local contested: { [string]: boolean } = {}
+		if typeof(entry.contested) == "table" then
+			for speciesId, flag in entry.contested do
+				if type(speciesId) == "string" and flag == true then
+					contested[speciesId] = true
+				end
+			end
+		end
+
+		local provenance = entry.provenance
+		if provenance ~= "measured" and provenance ~= "grown" and provenance ~= "composed" then
+			provenance = "grown"
+		end
+
+		table.insert(out, {
+			id = id,
+			name = name,
+			habitat = habitat,
+			depth = depth,
+			chartedDepth = chartedDepth,
+			species = species,
+			abundances = abundances,
+			contested = contested,
+			accessible = entry.accessible ~= false,
+			waterDepth = Ui.tonum(entry.waterDepth, 0),
+			quality = Ui.tonum(entry.quality, 0),
+			provenance = provenance,
+		})
+	end
+	return out
+end
+
+export type MarketRow = {
+	speciesId: string,
+	displayName: string,
+	price: number,
+	baseValue: number,
+	scarcityMultiplier: number,
+	globalAbundance: number,
+	direction: string,
+}
+
+--- Normalize the `entries` array of a MarketSync. Defaults keep every display
+--- format and the isScarce comparison fed with finite numbers even when a
+--- field is missing or the wrong type.
+function Ui.normalizeMarketEntries(raw: any): { MarketRow }
+	local out: { MarketRow } = {}
+	if typeof(raw) ~= "table" then
+		return out
+	end
+	for _, entry in raw do
+		if typeof(entry) ~= "table" then
+			continue
+		end
+		local id = entry.speciesId
+		if type(id) ~= "string" or #id == 0 then
+			continue
+		end
+
+		local displayName = entry.displayName
+		if type(displayName) ~= "string" or #displayName == 0 then
+			displayName = id
+		end
+		local direction = entry.direction
+		if direction ~= "rising" and direction ~= "falling" and direction ~= "flat" then
+			direction = "flat"
+		end
+
+		table.insert(out, {
+			speciesId = id,
+			displayName = displayName,
+			price = Ui.tonum(entry.price, 0),
+			baseValue = Ui.tonum(entry.baseValue, 0),
+			scarcityMultiplier = Ui.tonum(entry.scarcityMultiplier, 1),
+			globalAbundance = Ui.tonum(entry.globalAbundance, 1),
+			direction = direction,
+		})
+	end
+	return out
 end
 
 --=============================================================================
@@ -447,79 +632,141 @@ end
 --=============================================================================
 -- GameClock
 --
--- The server is the only authority on time; the client extrapolates. An
--- OceanSync carries month/day/tick every few seconds, and between syncs the
--- clock coasts on os.clock so the tide curve moves smoothly instead of
--- stepping every sync.
+-- The server is the only authority on time; the client extrapolates. Every
+-- OceanSync carries the server's own tide hour (`tide.hour`, see
+-- OceanService.tideState) plus month/day, and the clock anchors on THAT —
+-- never on a client-side conversion of the tick count. The tick conversion
+-- once ran the tide at twice the server's speed: Config's TICKS_PER_DAY
+-- implied 2 game hours per tick while the service advances its hour by 1.0,
+-- so the HUD promised slack water the server had not reached.
 --
--- tick -> game hours: TICKS_PER_DAY ticks make one HOURS_PER_DAY day, so one
--- tick is HOURS_PER_DAY / TICKS_PER_DAY game hours (2 at current tuning).
--- The real-seconds-per-tick rate is MEASURED from consecutive syncs rather
--- than hard-coded, so countdowns stay honest if the server cadence is retuned;
--- the default matches OceanService._TICK_INTERVAL until the first measurement.
+-- Between syncs the clock coasts on os.clock so the tide curve moves smoothly
+-- instead of stepping every sync. The rate (game hours per real second) is
+-- MEASURED from consecutive server hours rather than hard-coded, so
+-- countdowns stay honest if the server cadence is retuned; the default
+-- matches OceanService: one game hour per _TICK_INTERVAL tick (20 s). The
+-- 24-hour rollover is unwrapped so coasting stays continuous, and an hour
+-- that jumps backwards beyond a wrap (a server restart) drops the measured
+-- rate and re-anchors instead of extrapolating across the reset.
 --=============================================================================
 
 export type GameClock = {
-	hoursPerTick: number,
-	defaultSecondsPerTick: number,
-	secondsPerTick: number,
+	defaultHoursPerSecond: number,
+	hoursPerSecond: number,
 	anchorHour: number,
 	anchorAt: number,
-	prevTick: number,
-	prevAt: number,
+	prevServerHour: number,
+	prevContinuousHour: number,
+	rateAnchorHour: number,
+	rateAnchorAt: number,
 	month: number,
 	day: number,
 	synced: boolean,
 }
 
-function Ui.newClock(hoursPerTick: number, defaultSecondsPerTick: number): GameClock
+function Ui.newClock(defaultHoursPerSecond: number): GameClock
 	return {
-		hoursPerTick = hoursPerTick,
-		defaultSecondsPerTick = defaultSecondsPerTick,
-		secondsPerTick = defaultSecondsPerTick,
+		defaultHoursPerSecond = defaultHoursPerSecond,
+		hoursPerSecond = defaultHoursPerSecond,
 		anchorHour = 0,
 		anchorAt = 0,
-		prevTick = -1,
-		prevAt = 0,
+		prevServerHour = -1,
+		prevContinuousHour = 0,
+		rateAnchorHour = 0,
+		rateAnchorAt = 0,
 		month = 1,
 		day = 1,
 		synced = false,
 	}
 end
 
-function Ui.clockSync(clock: GameClock, month: number, day: number, tick: number): ()
-	local now = os.clock()
+--- Absorb an OceanSync. Every argument is wire data and is validated here: a
+--- malformed month, day, tick or hour degrades to a default instead of
+--- poisoning the clock (a NaN hour would blank every panel that renders it).
+---
+--- `serverHour` is the authoritative `tide.hour`. When it is missing the
+--- clock falls back to the tick count at the server's actual rate of one
+--- game hour per tick (OceanService.tickOcean advances `svc.hour` by 1.0).
+function Ui.clockSync(
+	clock: GameClock,
+	month: any,
+	day: any,
+	tick: any,
+	serverHour: any,
+	now: number?
+): ()
+	local at = if now ~= nil then now else os.clock()
 
-	if clock.prevTick >= 0 and tick > clock.prevTick then
-		local realSpan = now - clock.prevAt
-		-- a sync that lands almost immediately after the last one measures a
-		-- nonsense rate; only trust spans long enough to be real
-		if realSpan > 0.25 then
-			clock.secondsPerTick = realSpan / (tick - clock.prevTick)
-		end
-	elseif tick < clock.prevTick then
-		-- tick went backwards: the server restarted. Drop the rate history so
-		-- the new world re-anchors instead of extrapolating across the reset
-		clock.secondsPerTick = clock.defaultSecondsPerTick
+	local hour = Ui.tonum(serverHour, -1)
+	if hour < 0 then
+		-- no usable server hour: fall back to the tick count
+		hour = Ui.tonum(tick, 0) % 24
+	else
+		hour %= 24
 	end
 
-	clock.prevTick = tick
-	clock.prevAt = now
-	clock.anchorHour = tick * clock.hoursPerTick
-	clock.anchorAt = now
-	clock.month = month
-	clock.day = day
+	local monthN = Ui.tonum(month, 1)
+	clock.month = math.clamp(math.floor(monthN), 1, #Ui.MONTHS)
+	clock.day = math.max(1, math.floor(Ui.tonum(day, 1)))
+
+	local delta = 0
+	if clock.synced then
+		delta = hour - clock.prevServerHour
+		-- unwrap the midnight rollover in whichever direction it happened
+		if delta < -12 then
+			delta += 24
+		elseif delta > 12 then
+			delta -= 24
+		end
+	end
+
+	local continuous = if clock.synced then clock.prevContinuousHour + delta else hour
+
+	if clock.synced then
+		-- The rate is measured over a ROLLING WINDOW: from the last sync
+		-- whose hour actually moved, not from consecutive syncs. The server
+		-- steps its hour once per tick while broadcasting several times per
+		-- tick, so per-sync measurement would capture the step's own speed
+		-- (four times the true average here) and the coast between syncs
+		-- would sprint and snap back.
+		local moved = continuous - clock.rateAnchorHour
+		local span = at - clock.rateAnchorAt
+		if math.abs(moved) >= 0.5 and span > 0.25 then
+			local rate = moved / span
+			if moved < 0 or rate ~= rate or rate > 0.25 then
+				-- backwards past a wrap, or a leap no real cadence allows:
+				-- the server restarted or stuttered, re-anchor on the default
+				clock.hoursPerSecond = clock.defaultHoursPerSecond
+			else
+				clock.hoursPerSecond = rate
+			end
+			clock.rateAnchorHour = continuous
+			clock.rateAnchorAt = at
+		end
+	else
+		clock.rateAnchorHour = continuous
+		clock.rateAnchorAt = at
+	end
+
+	clock.prevServerHour = hour
+	clock.prevContinuousHour = continuous
+	clock.anchorHour = continuous
+	clock.anchorAt = at
 	clock.synced = true
 end
 
-function Ui.clockHour(clock: GameClock): number
-	return clock.anchorHour + (os.clock() - clock.anchorAt) / clock.secondsPerTick * clock.hoursPerTick
+function Ui.clockHour(clock: GameClock, now: number?): number
+	local at = if now ~= nil then now else os.clock()
+	return clock.anchorHour + (at - clock.anchorAt) * clock.hoursPerSecond
 end
 
 --- Real seconds per game hour. Countdowns must speak real time — "slack in
 --- 0:40" that secretly means four real minutes is worse than no countdown.
 function Ui.clockSecondsPerGameHour(clock: GameClock): number
-	return clock.secondsPerTick / clock.hoursPerTick
+	if clock.hoursPerSecond > 0 then
+		return 1 / clock.hoursPerSecond
+	end
+	return 1 / clock.defaultHoursPerSecond
 end
 
 --=============================================================================
@@ -538,23 +785,26 @@ export type Sheet = {
 	isOpen: boolean,
 	open: (Sheet) -> (),
 	close: (Sheet) -> (),
+	setSubtitle: (Sheet, string) -> (),
 }
 
 local OPEN_PANEL_ATTRIBUTE = "SlackWaterOpenPanel"
 
-function Ui.makeSheet(opts: {
-	root: Frame,
-	tracker: Conns,
-	playerGui: Instance,
-	key: string, -- unique among sheets; written to the coordination attribute
-	icon: string, -- emoji on the edge toggle
-	caption: string, -- tiny caption under the icon
-	title: string,
-	subtitle: string,
-	width: number,
-	height: number,
-	yScale: number, -- vertical position of the edge toggle, 0..1
-}): Sheet
+function Ui.makeSheet(
+	opts: {
+		root: Frame,
+		tracker: Conns,
+		playerGui: Instance,
+		key: string, -- unique among sheets; written to the coordination attribute
+		icon: string, -- emoji on the edge toggle
+		caption: string, -- tiny caption under the icon
+		title: string,
+		subtitle: string,
+		width: number,
+		height: number,
+		yScale: number, -- vertical position of the edge toggle, 0..1
+	}
+): Sheet
 	local root = opts.root
 
 	local toggle = Ui.button(root, {
@@ -612,7 +862,8 @@ function Ui.makeSheet(opts: {
 		font = Enum.Font.GothamBold,
 		size = UDim2.new(1, -40, 0, 20),
 	})
-	Ui.label(frame, {
+	local subtitleLabel = Ui.label(frame, {
+		name = "Subtitle",
 		text = opts.subtitle,
 		textSize = 10,
 		color = "dim",
@@ -650,6 +901,9 @@ function Ui.makeSheet(opts: {
 		isOpen = false,
 		open = function() end,
 		close = function() end,
+		setSubtitle = function(_: Sheet, text: string)
+			subtitleLabel.Text = text
+		end,
 	}
 
 	local parkedPos = UDim2.new(1, opts.width + 40, 0.5, 0)
@@ -691,11 +945,15 @@ function Ui.makeSheet(opts: {
 		sheet.close(sheet)
 	end)
 	-- when another sheet opens, this one yields the screen
-	Ui.connect(opts.tracker, opts.playerGui:GetAttributeChangedSignal(OPEN_PANEL_ATTRIBUTE), function()
-		if opts.playerGui:GetAttribute(OPEN_PANEL_ATTRIBUTE) ~= opts.key and sheet.isOpen then
-			sheet.close(sheet)
+	Ui.connect(
+		opts.tracker,
+		opts.playerGui:GetAttributeChangedSignal(OPEN_PANEL_ATTRIBUTE),
+		function()
+			if opts.playerGui:GetAttribute(OPEN_PANEL_ATTRIBUTE) ~= opts.key and sheet.isOpen then
+				sheet.close(sheet)
+			end
 		end
-	end)
+	)
 
 	return sheet
 end

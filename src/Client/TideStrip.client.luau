@@ -24,7 +24,15 @@
 
 local Ui = require(script and script.Parent.Ui or "./Ui")
 
-local DEFAULT_SECONDS_PER_TICK = 20 -- matches OceanService._TICK_INTERVAL
+-- One game hour per 20 s: OceanService advances its hour by 1.0 per
+-- _TICK_INTERVAL tick. Only the fallback rate; the clock measures the real
+-- rate from consecutive server tide hours after the second sync.
+local DEFAULT_HOURS_PER_SECOND = 1 / 20
+
+-- The server broadcasts every 5 s (OceanService._SYNC_INTERVAL); see HUD for
+-- what the two thresholds mean.
+local OCEAN_STALE_AFTER = 12
+local CONNECT_FAIL_AFTER = 30
 
 local LOOKBACK_HOURS = 2
 local FORWARD_HOURS = 12
@@ -48,10 +56,11 @@ local function main(): ()
 	local Shared = ReplicatedStorage:WaitForChild("Shared")
 	local Types = require(Shared:WaitForChild("Types") :: ModuleScript)
 	local Tide = require(Shared:WaitForChild("Tide") :: ModuleScript)
-	local Config = require(Shared:WaitForChild("Config") :: ModuleScript)
 
 	local connections: Ui.Conns = {}
-	local clock = Ui.newClock(Config.HOURS_PER_DAY / Config.TICKS_PER_DAY, DEFAULT_SECONDS_PER_TICK)
+	local clock = Ui.newClock(DEFAULT_HOURS_PER_SECOND)
+	local lastOceanSyncAt = 0
+	local startedAt = os.clock()
 
 	-- ---------------------------------------------------------------------------
 	-- Build
@@ -197,7 +206,9 @@ local function main(): ()
 	-- module — nothing here touches game state.
 	-- ---------------------------------------------------------------------------
 
-	local function nextSlackWindow(hour: number): { active: boolean, startsIn: number, endsIn: number }
+	local function nextSlackWindow(
+		hour: number
+	): { active: boolean, startsIn: number, endsIn: number }
 		local searchLimit = 10 -- game hours; longer than any gap between slacks
 		local startT: number? = nil
 
@@ -237,7 +248,9 @@ local function main(): ()
 			return
 		end
 		local p = payload :: Types.OceanSyncPayload
-		Ui.clockSync(clock, p.month or 1, p.day or 1, p.tick or 0)
+		lastOceanSyncAt = os.clock()
+		local tideHour = if typeof(p.tide) == "table" then (p.tide :: any).hour else nil
+		Ui.clockSync(clock, p.month, p.day, p.tick, tideHour)
 	end
 
 	task.spawn(function()
@@ -336,7 +349,27 @@ local function main(): ()
 
 		if not clock.synced then
 			placeholder.Visible = true
-			placeholder.TextTransparency = 0.45 + 0.3 * math.abs(math.sin(os.clock() * 2.5))
+			if os.clock() - startedAt > CONNECT_FAIL_AFTER then
+				placeholder.Text = "no ocean — server not answering"
+				placeholder.TextColor3 = Ui.color("amber")
+				placeholder.TextTransparency = 0
+			else
+				placeholder.Text = "reading the chart…"
+				placeholder.TextColor3 = Ui.color("dim")
+				placeholder.TextTransparency = 0.45 + 0.3 * math.abs(math.sin(os.clock() * 2.5))
+			end
+			return
+		end
+		if os.clock() - lastOceanSyncAt > OCEAN_STALE_AFTER then
+			-- a frozen curve with a live-looking "now" marker would be a lie;
+			-- say so and stop rendering rather than coasting on a dead clock
+			placeholder.Visible = true
+			placeholder.Text = "lost the ocean — waiting on the server"
+			placeholder.TextColor3 = Ui.color("amber")
+			placeholder.TextTransparency = 0
+			bigLabel.Text = "—"
+			subLabel.Text = ""
+			eventsLabel.Text = ""
 			return
 		end
 		placeholder.Visible = false

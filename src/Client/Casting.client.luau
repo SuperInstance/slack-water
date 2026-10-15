@@ -182,30 +182,36 @@ end
 
 function Casting._bindInput(casting: Casting): ()
 	-- Touch: hold anywhere that is not a UI element to reel.
-	casting._touchConn = UserInputService.InputBegan:Connect(function(input: any, processed: boolean)
-		if processed then
-			return
+	casting._touchConn = UserInputService.InputBegan:Connect(
+		function(input: any, processed: boolean)
+			if processed then
+				return
+			end
+			if input.UserInputType == Enum.UserInputType.Touch then
+				setHolding(casting, true)
+			end
 		end
-		if input.UserInputType == Enum.UserInputType.Touch then
-			setHolding(casting, true)
-		end
-	end)
+	)
 
-	casting._touchEnd = UserInputService.InputEnded:Connect(function(input: any, _processed: boolean)
-		if input.UserInputType == Enum.UserInputType.Touch then
-			setHolding(casting, false)
+	casting._touchEnd = UserInputService.InputEnded:Connect(
+		function(input: any, _processed: boolean)
+			if input.UserInputType == Enum.UserInputType.Touch then
+				setHolding(casting, false)
+			end
 		end
-	end)
+	)
 
 	-- Mouse/trackpad: hold the left button, but only over the play area.
-	casting._mouseConn = UserInputService.InputBegan:Connect(function(input: any, processed: boolean)
-		if processed then
-			return
+	casting._mouseConn = UserInputService.InputBegan:Connect(
+		function(input: any, processed: boolean)
+			if processed then
+				return
+			end
+			if input.UserInputType == Enum.UserInputType.MouseButton1 then
+				setHolding(casting, true)
+			end
 		end
-		if input.UserInputType == Enum.UserInputType.MouseButton1 then
-			setHolding(casting, true)
-		end
-	end)
+	)
 
 	casting._mouseUp = UserInputService.InputEnded:Connect(function(input: any, _processed: boolean)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -281,7 +287,12 @@ end
 --- Begin a fight against a species at a region.
 ---
 --- Returns immediately; drive it with `update` and listen for the outcome.
-function Casting.beginFight(casting: Casting, regionId: string, speciesId: string, depth: number?): boolean
+function Casting.beginFight(
+	casting: Casting,
+	regionId: string,
+	speciesId: string,
+	depth: number?
+): boolean
 	local species = Species.get(speciesId)
 	if not species then
 		return false
@@ -293,7 +304,9 @@ function Casting.beginFight(casting: Casting, regionId: string, speciesId: strin
 	casting.maxDepth = species.maxDepth
 	-- Default to the middle of the band: the *default* position should be the
 	-- informed one, and the player should have to work to do worse.
-	casting.depth = if depth then math.clamp(depth, species.minDepth, species.maxDepth) else (species.minDepth + species.maxDepth) / 2
+	casting.depth = if depth
+		then math.clamp(depth, species.minDepth, species.maxDepth)
+		else (species.minDepth + species.maxDepth) / 2
 
 	casting.tension = 0
 	casting.progress = 0

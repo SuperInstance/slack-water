@@ -82,23 +82,23 @@ local function main(): ()
 		table.clear(rows)
 	end
 
-	local function regionAverageAbundance(region: any): number
-		-- iterate the server's species array (not the abundance map) so the
-		-- average is over a deterministic order and absent keys stay absent
-		local present = region.species or {}
+	-- regions are normalized on arrival (Ui.normalizeRegions): ids are
+	-- strings, numbers are finite, provenance is one of the three honest
+	-- labels. Nothing below has to defend against the wire again.
+	local function regionAverageAbundance(region: Ui.RegionRow): number
+		local present = region.species
 		if #present == 0 then
 			return 0
 		end
-		local abundances = region.abundances or {}
 		local total = 0
 		for _, speciesId in present do
-			total += tonumber(abundances[speciesId]) or 0
+			total += region.abundances[speciesId] or 0
 		end
 		return total / #present
 	end
 
-	local function hasContested(region: any): boolean
-		for _, flag in region.contested or {} do
+	local function hasContested(region: Ui.RegionRow): boolean
+		for _, flag in region.contested do
 			if flag == true then
 				return true
 			end
@@ -106,8 +106,8 @@ local function main(): ()
 		return false
 	end
 
-	local function speciesSummary(region: any): string
-		local present = region.species or {}
+	local function speciesSummary(region: Ui.RegionRow): string
+		local present = region.species
 		if #present == 0 then
 			return "nothing holding here — let it rest"
 		end
@@ -126,8 +126,9 @@ local function main(): ()
 		return text
 	end
 
-	local function rebuild(regions: { any }): ()
+	local function rebuild(regions: { Ui.RegionRow }): ()
 		destroyRows()
+		emptyLabel.Text = "reading the grounds…"
 
 		if #regions == 0 then
 			emptyLabel.Visible = true
@@ -136,7 +137,7 @@ local function main(): ()
 		emptyLabel.Visible = false
 
 		-- richest first: the top of the list is where you go next
-		local scored: { { region: any, avg: number } } = {}
+		local scored: { { region: Ui.RegionRow, avg: number } } = {}
 		for _, region in regions do
 			table.insert(scored, { region = region, avg = regionAverageAbundance(region) })
 		end
@@ -149,25 +150,30 @@ local function main(): ()
 			local avg = item.avg
 			local collapse = Config.COLLAPSE_THRESHOLD
 			local contested = hasContested(region)
+			local inaccessible = region.accessible ~= true
+			-- "~" is the chart convention for approximate: only measured
+			-- ground is shown as surveyed fact (house rule 6)
+			local unsurveyed = region.provenance ~= "measured"
 
 			local row = Ui.frame(scroll, {
 				name = "Row" .. tostring(index),
 				size = UDim2.new(1, 0, 0, 64),
 				color = "deep",
-				transparency = 0.2,
+				-- a ground the tide has cut off recedes like a locked row
+				transparency = if inaccessible then 0.45 else 0.2,
 				corner = 8,
 				layoutOrder = index,
 			})
 
 			Ui.label(row, {
-				text = region.name or region.id,
+				text = if unsurveyed then region.name .. " ~" else region.name,
 				textSize = 13.5,
 				font = Enum.Font.GothamBold,
 				size = UDim2.new(1, -70, 0, 16),
 				pos = UDim2.fromOffset(10, 5),
 			})
 			Ui.label(row, {
-				text = string.format("%d m", math.floor(region.depth or 0)),
+				text = string.format("%d m", math.floor(region.chartedDepth)),
 				textSize = 11,
 				color = "dim",
 				size = UDim2.fromOffset(56, 14),
@@ -177,8 +183,8 @@ local function main(): ()
 			})
 
 			-- habitat keeps its colour everywhere it appears (see Ui theme)
-			local habitatHex = HABITAT_HEX[region.habitat or ""] or "#8c9eaf"
-			local habitatText = string.upper(region.habitat or "—")
+			local habitatHex = HABITAT_HEX[region.habitat] or "#8c9eaf"
+			local habitatText = if #region.habitat > 0 then string.upper(region.habitat) else "—"
 			Ui.label(row, {
 				text = string.format('<font color="%s">%s</font>', habitatHex, habitatText),
 				textSize = 10,
@@ -204,6 +210,9 @@ local function main(): ()
 			elseif avg < collapse then
 				statusText = "PICKED OVER"
 				statusColor = "danger"
+			elseif inaccessible then
+				statusText = "WAIT FOR TIDE"
+				statusColor = "amber"
 			end
 			if statusText ~= "" then
 				Ui.label(row, {
@@ -244,25 +253,66 @@ local function main(): ()
 	-- Server payloads
 	-- ---------------------------------------------------------------------------
 
-	local latest: { any } = {}
+	local OCEAN_STALE_AFTER = 12 -- the ocean broadcast runs every 5 s
+	local latest: { Ui.RegionRow } = {}
+	local lastSyncAt = 0
+
+	local function feedStale(): boolean
+		return lastSyncAt > 0 and os.clock() - lastSyncAt > OCEAN_STALE_AFTER
+	end
+
+	local function renderCurrent(): ()
+		if feedStale() then
+			destroyRows()
+			emptyLabel.Text = "lost the ocean — showing nothing"
+			emptyLabel.Visible = true
+			return
+		end
+		rebuild(latest)
+	end
 
 	local function onOceanSync(payload: any)
 		if typeof(payload) ~= "table" then
 			return
 		end
 		local p = payload :: Types.OceanSyncPayload
-		latest = p.regions or {}
+		lastSyncAt = os.clock()
+		latest = Ui.normalizeRegions(p.regions)
+
+		-- how much of the chart real soundings back: the server's own honesty
+		-- number, repeated verbatim as the sheet's subtitle
+		local coverage = math.clamp(Ui.tonum((p :: any).chartCoverage, 0), 0, 1)
+		sheet.setSubtitle(
+			sheet,
+			string.format(
+				"sorted by what is left · %d%% of the chart surveyed",
+				math.floor(coverage * 100 + 0.5)
+			)
+		)
+
 		if sheet.isOpen then
-			rebuild(latest)
+			renderCurrent()
 		end
 	end
 
 	local open = sheet.open
 	local sheetOpen = function(self: Ui.Sheet)
 		open(self)
-		rebuild(latest)
+		renderCurrent()
 	end
 	sheet.open = sheetOpen
+
+	-- while open, a dead feed switches the sheet to its lost state instead of
+	-- leaving the last grounds reading as current
+	local alive = true
+	task.spawn(function()
+		while alive do
+			task.wait(5)
+			if alive and sheet.isOpen and feedStale() then
+				renderCurrent()
+			end
+		end
+	end)
 
 	task.spawn(function()
 		for _ = 1, 15 do
@@ -276,6 +326,7 @@ local function main(): ()
 	end)
 
 	Ui.connect(connections, gui.Destroying, function()
+		alive = false
 		Ui.disconnectAll(connections)
 	end)
 end

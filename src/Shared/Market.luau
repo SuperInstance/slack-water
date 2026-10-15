@@ -101,7 +101,11 @@ end
 --=============================================================================
 
 --- Refresh one species from its current global abundance.
-function Market.updateSpecies(market: Market, speciesId: string, globalAbundance: number): PriceEntry?
+function Market.updateSpecies(
+	market: Market,
+	speciesId: string,
+	globalAbundance: number
+): PriceEntry?
 	local entry = market.entries[speciesId]
 	if not entry then
 		return nil

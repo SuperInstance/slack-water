@@ -89,7 +89,12 @@ end
 
 --- Record a cast that has been applied locally but not yet confirmed by the
 --- Worker.
-function Reconcile.queue(reconciler: Reconciler, regionId: string, speciesId: string, biomass: number): ()
+function Reconcile.queue(
+	reconciler: Reconciler,
+	regionId: string,
+	speciesId: string,
+	biomass: number
+): ()
 	if biomass <= 0.0 then
 		return
 	end
@@ -288,11 +293,7 @@ end
 --- Returns how many deltas were replayed, which the server logs. A steadily
 --- growing replay count means the Worker is unreachable and the local ocean is
 --- drifting from the shared one — the signal to alert on.
-function Reconcile.applySnapshot(
-	ocean: any,
-	reconciler: Reconciler,
-	snapshot: Snapshot
-): number
+function Reconcile.applySnapshot(ocean: any, reconciler: Reconciler, snapshot: Snapshot): number
 	-- The Worker owns the clock. Adopting it is what keeps the salmon runs in
 	-- step across servers.
 	if snapshot.month ~= nil then
@@ -369,7 +370,10 @@ end
 --- the unconfirmed queue is growing. A server that has been offline from the
 --- backend for a while is running its own economy and should say so rather than
 --- quietly pretending otherwise.
-function Reconcile.health(reconciler: Reconciler, everSynced: boolean): { ok: boolean, reason: string, pending: number }
+function Reconcile.health(
+	reconciler: Reconciler,
+	everSynced: boolean
+): { ok: boolean, reason: string, pending: number }
 	local pending = #reconciler.pending
 	if not everSynced then
 		return { ok = true, reason = "local", pending = pending }

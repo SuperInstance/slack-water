@@ -152,12 +152,14 @@ function Service.start(): Service?
 	instance = svc
 	Service.beginLoops(svc)
 
-	print(string.format(
-		"[slack-water] ocean started: %d regions, %d species, seed %d",
-		#ocean.order,
-		#Species.list,
-		seed
-	))
+	print(
+		string.format(
+			"[slack-water] ocean started: %d regions, %d species, seed %d",
+			#ocean.order,
+			#Species.list,
+			seed
+		)
+	)
 
 	return svc
 end
@@ -363,10 +365,9 @@ function Service.pullGlobal(svc: Service): boolean
 	-- Replaying on top of every snapshot means a growing queue means we are
 	-- drifting from the shared ocean. That is the signal worth a log line.
 	if replayed > 0 then
-		print(string.format(
-			"[slack-water] global sync: %d unconfirmed catch(es) replayed",
-			replayed
-		))
+		print(
+			string.format("[slack-water] global sync: %d unconfirmed catch(es) replayed", replayed)
+		)
 	end
 
 	Service.refreshMarket(svc)
@@ -537,7 +538,14 @@ function Service.composeNewBanks(svc: Service): ()
 		Service.fillWithProceduralBanks(svc)
 	end
 
-	print(string.format("[slack-water] composition round %d: %d/%d banks admitted", svc.round, admitted, #result.banks))
+	print(
+		string.format(
+			"[slack-water] composition round %d: %d/%d banks admitted",
+			svc.round,
+			admitted,
+			#result.banks
+		)
+	)
 end
 
 --- Fallback generation. Keeps the discovery treadmill running even with no

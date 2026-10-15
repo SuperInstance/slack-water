@@ -1,0 +1,23 @@
+Easting	Northing	Depth_ft
+# Synthetic test fixture in FEET — NOT real survey data.
+# Tab-separated with header, the shape most GIS tools export by default.
+0	0	60
+100	0	66
+200	0	72
+300	0	78
+400	0	84
+0	100	72
+100	100	79
+200	100	86
+300	100	93
+400	100	100
+0	200	85
+100	200	92
+200	200	100
+300	200	108
+400	200	116
+0	300	98
+100	300	106
+200	300	115
+300	300	124
+400	300	133

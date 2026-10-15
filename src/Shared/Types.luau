@@ -175,9 +175,27 @@ Types.Gear = {
 	handline = { id = "handline", displayName = "Handline", effort = 6, price = 0, unlockLevel = 1 },
 	rod = { id = "rod", displayName = "Fishing Rod", effort = 14, price = 250, unlockLevel = 2 },
 	gi = { id = "gi", displayName = "Barbed Hook", effort = 22, price = 1200, unlockLevel = 5 },
-	longline = { id = "longline", displayName = "Longline Rig", effort = 38, price = 6500, unlockLevel = 9 },
-	crab_pot = { id = "crab_pot", displayName = "Crab Pot", effort = 30, price = 4200, unlockLevel = 7 },
-	trawler = { id = "trawler", displayName = "Trawler Gear", effort = 60, price = 28000, unlockLevel = 14 },
+	longline = {
+		id = "longline",
+		displayName = "Longline Rig",
+		effort = 38,
+		price = 6500,
+		unlockLevel = 9,
+	},
+	crab_pot = {
+		id = "crab_pot",
+		displayName = "Crab Pot",
+		effort = 30,
+		price = 4200,
+		unlockLevel = 7,
+	},
+	trawler = {
+		id = "trawler",
+		displayName = "Trawler Gear",
+		effort = 60,
+		price = 28000,
+		unlockLevel = 14,
+	},
 } :: { [string]: Gear }
 
 return Types

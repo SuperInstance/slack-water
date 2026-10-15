@@ -207,7 +207,10 @@ local function serialize(value: any, indent: number): string
 		table.sort(keys)
 		local parts = {}
 		for _, k in keys do
-			table.insert(parts, inner .. '"' .. tostring(k) .. '": ' .. serialize(value[k], indent + 1))
+			table.insert(
+				parts,
+				inner .. '"' .. tostring(k) .. '": ' .. serialize(value[k], indent + 1)
+			)
 		end
 		return "{\n" .. table.concat(parts, ",\n") .. "\n" .. pad .. "}"
 	end

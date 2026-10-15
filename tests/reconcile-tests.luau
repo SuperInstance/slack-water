@@ -43,7 +43,14 @@ end
 
 local function assertEq(actual: any, expected: any, msg: string?)
 	if actual ~= expected then
-		error((msg or "values differ") .. " — expected " .. tostring(expected) .. ", got " .. tostring(actual), 2)
+		error(
+			(msg or "values differ")
+				.. " — expected "
+				.. tostring(expected)
+				.. ", got "
+				.. tostring(actual),
+			2
+		)
 	end
 end
 
@@ -202,7 +209,10 @@ suite("Reconcile — applying a snapshot", function()
 			regions = { r1 = { rockfish = localStock * 0.5 } },
 		})
 
-		assertTrue(stockOf(ocean, "rockfish") < localStock, "another server's fishing should lower our stock")
+		assertTrue(
+			stockOf(ocean, "rockfish") < localStock,
+			"another server's fishing should lower our stock"
+		)
 	end)
 
 	test("the Worker owns the calendar", function()
@@ -327,7 +337,6 @@ suite("Reconcile — health", function()
 		assertEq(Reconcile.health(r, true).pending, 1)
 	end)
 end)
-
 
 --=============================================================================
 -- Wire format

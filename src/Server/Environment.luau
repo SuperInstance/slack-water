@@ -1,6 +1,6 @@
 --!strict
 --[[
-	Environment — the look of the water.
+	Environment — the look of the sky over the water.
 
 	Deliberately minimal. On Roblox the difference between a place that reads as
 	"a dev made this" and one that reads as a game is overwhelmingly lighting,
@@ -9,10 +9,15 @@
 	These values are tuned for a cool North Pacific overcast morning rather than
 	tropical blue. The game's whole premise is a working ocean, so the light
 	should feel like weather you would actually fish in.
+
+	The water's own colour and foam live in Shared/Ocean/Water.luau and are
+	applied by Server/OceanSurface.luau. This file once tried to style a
+	Terrain "Water" instance here — dead code, since nothing ever created one
+	(the lookup ran twice and always returned nil) — so the sea's look now has
+	one owner and this file keeps the sky.
 ]]
 
 local Lighting = game:GetService("Lighting")
-local Workspace = game:GetService("Workspace")
 
 local Environment = {}
 
@@ -34,9 +39,6 @@ local TUNING = {
 	cloudsDensity = 0.42,
 	cloudsColor = Color3.fromRGB(202, 208, 212),
 	cloudsCover = 0.62,
-
-	waterColor = Color3.fromRGB(28, 62, 82),
-	waterReflectance = 0.28,
 }
 
 function Environment.apply(): ()
@@ -77,16 +79,6 @@ function Environment.apply(): ()
 	clouds.Color = TUNING.cloudsColor
 	clouds.Cover = TUNING.cloudsCover
 	clouds.Density = TUNING.cloudsDensity
-
-	local water = Workspace.Terrain and Workspace.Terrain:FindFirstChildOfClass("Water")
-	if not water then
-		water = Workspace.Terrain:FindFirstChildOfClass("Water")
-	end
-	if water then
-		water.WaterColor = TUNING.waterColor
-		water.WaterReflectance = TUNING.waterReflectance
-		water.WaterTransparency = 0.22
-	end
 end
 
 Environment.TUNING = TUNING

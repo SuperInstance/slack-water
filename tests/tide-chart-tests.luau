@@ -51,7 +51,14 @@ end
 
 local function assertEq(actual: any, expected: any, msg: string?)
 	if actual ~= expected then
-		error((msg or "values differ") .. " — expected " .. tostring(expected) .. ", got " .. tostring(actual), 2)
+		error(
+			(msg or "values differ")
+				.. " — expected "
+				.. tostring(expected)
+				.. ", got "
+				.. tostring(actual),
+			2
+		)
 	end
 end
 
@@ -68,7 +75,10 @@ suite("Tide — the clock", function()
 			maxH = math.max(maxH, h)
 		end
 		assertTrue(maxH - minH > 1.5, "tidal range should be felt, got " .. tostring(maxH - minH))
-		assertTrue(maxH - minH < 6.0, "tidal range should stay plausible, got " .. tostring(maxH - minH))
+		assertTrue(
+			maxH - minH < 6.0,
+			"tidal range should stay plausible, got " .. tostring(maxH - minH)
+		)
 	end)
 
 	test("the tide actually moves over a day", function()
@@ -274,8 +284,20 @@ suite("Chart — loading real data", function()
 	test("loads a decoded chart array", function()
 		local chart = Chart.new()
 		local loaded = Chart.loadFromChart(chart, {
-			{ id = "a", name = "Measured Shoal", chartedDepth = 3.1, provenance = "measured", confidence = 1.0 },
-			{ id = "b", name = "Grown Flats", chartedDepth = 20, provenance = "grown", confidence = 0.4 },
+			{
+				id = "a",
+				name = "Measured Shoal",
+				chartedDepth = 3.1,
+				provenance = "measured",
+				confidence = 1.0,
+			},
+			{
+				id = "b",
+				name = "Grown Flats",
+				chartedDepth = 20,
+				provenance = "grown",
+				confidence = 0.4,
+			},
 		})
 		assertEq(loaded, 2)
 		assertEq(Chart.get(chart, "a").chartedDepth, 3.1)

@@ -1,0 +1,23 @@
+Easting,Northing,Depth_fm
+# Synthetic test fixture in FATHOMS — NOT real survey data.
+# Local projected metres; classic multibeam export shape with a header row.
+0,0,10
+100,0,11
+200,0,12
+300,0,13
+400,0,14
+0,100,12
+100,100,13
+200,100,14
+300,100,15
+400,100,16
+0,200,14
+100,200,15
+200,200,16
+300,200,17
+400,200,18
+0,300,16
+100,300,17
+200,300,18
+300,300,19
+400,300,20

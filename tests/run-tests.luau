@@ -46,13 +46,29 @@ end
 
 local function assertEq(actual: any, expected: any, msg: string?)
 	if actual ~= expected then
-		error((msg or "values differ") .. " — expected " .. tostring(expected) .. ", got " .. tostring(actual), 2)
+		error(
+			(msg or "values differ")
+				.. " — expected "
+				.. tostring(expected)
+				.. ", got "
+				.. tostring(actual),
+			2
+		)
 	end
 end
 
 local function assertNear(actual: number, expected: number, tol: number, msg: string?)
 	if math.abs(actual - expected) > tol then
-		error((msg or "not within tolerance") .. " — expected " .. tostring(expected) .. " +/- " .. tostring(tol) .. ", got " .. tostring(actual), 2)
+		error(
+			(msg or "not within tolerance")
+				.. " — expected "
+				.. tostring(expected)
+				.. " +/- "
+				.. tostring(tol)
+				.. ", got "
+				.. tostring(actual),
+			2
+		)
 	end
 end
 
@@ -135,8 +151,12 @@ suite("Rng — determinism", function()
 		for _ = 1, 500 do
 			local v = Rng.int(r, 1, 3)
 			assertTrue(v >= 1 and v <= 3, "out of range: " .. tostring(v))
-			if v == 1 then sawLow = true end
-			if v == 3 then sawHigh = true end
+			if v == 1 then
+				sawLow = true
+			end
+			if v == 3 then
+				sawHigh = true
+			end
 		end
 		assertTrue(sawLow and sawHigh, "int should reach both bounds")
 	end)
@@ -147,7 +167,9 @@ suite("Rng — determinism", function()
 		local f2 = Rng.fork(base, "region-b")
 		local same = 0
 		for _ = 1, 100 do
-			if Rng.nextFloat(f1) == Rng.nextFloat(f2) then same += 1 end
+			if Rng.nextFloat(f1) == Rng.nextFloat(f2) then
+				same += 1
+			end
 		end
 		assertEq(same, 0, "forks should be independent")
 	end)
@@ -195,7 +217,10 @@ suite("Species — roster integrity", function()
 			assertTrue(s.anadromous, id .. " should be anadromous")
 			assertTrue(s.runMonths ~= nil, id .. " should have run months")
 			for _, m in s.runMonths do
-				assertTrue(m >= 1 and m <= Config.MONTHS_PER_YEAR, id .. " run month out of range: " .. tostring(m))
+				assertTrue(
+					m >= 1 and m <= Config.MONTHS_PER_YEAR,
+					id .. " run month out of range: " .. tostring(m)
+				)
 			end
 		end
 	end)
@@ -212,10 +237,14 @@ suite("Species — roster integrity", function()
 		local shallowHasHalibut = false
 		local deepHasHerring = false
 		for _, s in shallow do
-			if s.id == "halibut" then shallowHasHalibut = true end
+			if s.id == "halibut" then
+				shallowHasHalibut = true
+			end
 		end
 		for _, s in deep do
-			if s.id == "herring" then deepHasHerring = true end
+			if s.id == "herring" then
+				deepHasHerring = true
+			end
 		end
 		assertFalse(shallowHasHalibut, "halibut should not appear at 20m")
 		assertFalse(deepHasHerring, "herring should not appear at 600m")
@@ -274,7 +303,8 @@ suite("OceanSim — population dynamics", function()
 		local deep = newOcean(4)
 		OceanSim.addRegion(deep, makeRegion("deep", "sand", 600, 1.0))
 		assertTrue(
-			OceanSim.getCapacity(deep, "deep", "halibut") > OceanSim.getCapacity(shallow, "shallow", "halibut") * 5,
+			OceanSim.getCapacity(deep, "deep", "halibut")
+				> OceanSim.getCapacity(shallow, "shallow", "halibut") * 5,
 			"halibut capacity should be far greater in its depth band"
 		)
 	end)
@@ -285,12 +315,19 @@ suite("OceanSim — population dynamics", function()
 		local rng = Rng.new(5)
 		-- park on the coho window (months 8,9,10)
 		ocean.month = 7
-		for _ = 1, 12 do OceanSim.tick(ocean, rng) end
+		for _ = 1, 12 do
+			OceanSim.tick(ocean, rng)
+		end
 		local preRun = OceanSim.getStock(ocean, "est", "coho")
 		ocean.month = 9
-		for _ = 1, 12 do OceanSim.tick(ocean, rng) end
+		for _ = 1, 12 do
+			OceanSim.tick(ocean, rng)
+		end
 		local duringRun = OceanSim.getStock(ocean, "est", "coho")
-		assertTrue(duringRun > preRun, "run should add biomass: " .. tostring(preRun) .. " -> " .. tostring(duringRun))
+		assertTrue(
+			duringRun > preRun,
+			"run should add biomass: " .. tostring(preRun) .. " -> " .. tostring(duringRun)
+		)
 	end)
 
 	test("a run window fires regardless of anadromy", function()
@@ -319,7 +356,13 @@ suite("OceanSim — population dynamics", function()
 		end
 		local inRun = OceanSim.getStock(ocean, "kelpRegion", "herring")
 
-		assertTrue(inRun > outOfRun, "the herring run should add biomass: " .. tostring(outOfRun) .. " -> " .. tostring(inRun))
+		assertTrue(
+			inRun > outOfRun,
+			"the herring run should add biomass: "
+				.. tostring(outOfRun)
+				.. " -> "
+				.. tostring(inRun)
+		)
 	end)
 
 	test("every species with a run window actually produces inflow", function()
@@ -343,7 +386,10 @@ suite("OceanSim — population dynamics", function()
 						break
 					end
 				end
-				assertTrue(outside ~= nil, species.id .. " is running all year; nothing to compare against")
+				assertTrue(
+					outside ~= nil,
+					species.id .. " is running all year; nothing to compare against"
+				)
 				ocean.month = outside :: number
 				for _ = 1, 12 do
 					OceanSim.tick(ocean, rng)
@@ -364,7 +410,7 @@ suite("OceanSim — population dynamics", function()
 		end
 	end)
 
-test("the whole simulation is deterministic", function()
+	test("the whole simulation is deterministic", function()
 		local function run(): { number }
 			local ocean = newOcean(777)
 			OceanSim.addRegion(ocean, makeRegion("a", "reef", 60, 1.0))
@@ -415,7 +461,10 @@ suite("OceanSim — harvest and scarcity", function()
 		-- the cap is against capacity, not current stock
 		assertTrue(
 			res.yielded <= cap * Config.MAX_HARVEST_FRACTION + 1e-6,
-			"harvest exceeded cap fraction: " .. tostring(res.yielded) .. " > " .. tostring(cap * Config.MAX_HARVEST_FRACTION)
+			"harvest exceeded cap fraction: "
+				.. tostring(res.yielded)
+				.. " > "
+				.. tostring(cap * Config.MAX_HARVEST_FRACTION)
 		)
 		assertTrue(res.yielded < stock, "a single cast must not take the entire stock")
 	end)
@@ -438,7 +487,10 @@ suite("OceanSim — harvest and scarcity", function()
 		assertTrue(richRes ~= nil and poorRes ~= nil, "nil results")
 		assertTrue(
 			richRes.yielded > poorRes.yielded,
-			"a rich ground must out-yield a depleted one: " .. tostring(richRes.yielded) .. " vs " .. tostring(poorRes.yielded)
+			"a rich ground must out-yield a depleted one: "
+				.. tostring(richRes.yielded)
+				.. " vs "
+				.. tostring(poorRes.yielded)
 		)
 	end)
 
@@ -474,7 +526,10 @@ suite("OceanSim — harvest and scarcity", function()
 			OceanSim.tick(ocean, rng)
 		end
 		local recovered = OceanSim.abundance(ocean, "r1", "rockfish")
-		assertTrue(recovered > depleted, "stock should recover: " .. tostring(depleted) .. " -> " .. tostring(recovered))
+		assertTrue(
+			recovered > depleted,
+			"stock should recover: " .. tostring(depleted) .. " -> " .. tostring(recovered)
+		)
 	end)
 
 	test("extirpation floor prevents permanent regional extinction", function()
@@ -503,9 +558,15 @@ suite("OceanSim — harvest and scarcity", function()
 
 	test("harvesting an unknown species or missing region is safe", function()
 		local ocean = newOcean(14)
-		assertTrue(OceanSim.harvest(ocean, "r1", "rockfish", 5) == nil, "missing region should yield nil")
+		assertTrue(
+			OceanSim.harvest(ocean, "r1", "rockfish", 5) == nil,
+			"missing region should yield nil"
+		)
 		OceanSim.addRegion(ocean, makeRegion("r1", "reef", 60, 1.0))
-		assertTrue(OceanSim.harvest(ocean, "r1", "not_a_fish", 5) == nil, "unknown species should yield nil")
+		assertTrue(
+			OceanSim.harvest(ocean, "r1", "not_a_fish", 5) == nil,
+			"unknown species should yield nil"
+		)
 	end)
 end)
 
@@ -571,6 +632,20 @@ suite("OceanSim — snapshot", function()
 		assertNear(snap.regions["a"]["rockfish"], OceanSim.getStock(ocean, "a", "rockfish"), 1e-9)
 	end)
 end)
+
+--=============================================================================
+-- Water surface suites
+--
+-- Kept in tests/water-tests.luau in the house style; invoked (and its counts
+-- merged) here so ./tests/run.sh stays the single entry point.
+--=============================================================================
+
+local waterPassed, waterFailed, waterFailures = require("./water-tests").run()
+passed += waterPassed
+failed += waterFailed
+for _, f in waterFailures do
+	table.insert(failures, f)
+end
 
 --=============================================================================
 -- Summary

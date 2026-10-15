@@ -63,8 +63,16 @@ local function main(): ()
 	-- cast mid-display swaps cards cleanly instead of fighting a timer
 	local cardToken = 0
 	local currentCard: Frame? = nil
+	local currentCardConns: Ui.Conns? = nil
 
 	local function destroyCurrent(): ()
+		-- the dismiss connection belongs to the card, not the panel: without
+		-- this, a long session accumulates connections to destroyed cards
+		local conns = currentCardConns
+		currentCardConns = nil
+		if conns then
+			Ui.disconnectAll(conns)
+		end
 		local card = currentCard
 		currentCard = nil
 		if card then
@@ -149,8 +157,10 @@ local function main(): ()
 		destroyCurrent()
 		cardToken += 1
 		local token = cardToken
+		local cardConns: Ui.Conns = {}
 
-		local species = Species.get(p.speciesId)
+		local speciesId = if type(p.speciesId) == "string" then p.speciesId else nil
+		local species = if speciesId then Species.get(speciesId) else nil
 
 		-- career fields are pending Types.luau additions, so they are read
 		-- untyped and rendered only when present; command-bar fixtures and
@@ -197,7 +207,10 @@ local function main(): ()
 			xalign = Enum.TextXAlignment.Center,
 		})
 		Ui.label(card, {
-			text = species and species.displayName or p.speciesId,
+			text = if species
+				then species.displayName
+				elseif speciesId then speciesId
+				else "something took the line",
 			textSize = 21,
 			font = Enum.Font.GothamBold,
 			size = UDim2.new(1, 0, 0, 24),
@@ -225,14 +238,14 @@ local function main(): ()
 
 		-- what it is worth — both numbers straight off the wire
 		Ui.label(card, {
-			text = Ui.formatWeight(p.weightKg or 0),
+			text = Ui.formatWeight(Ui.tonum(p.weightKg, 0)),
 			textSize = 12,
 			color = "dim",
 			size = UDim2.new(1, 0, 0, 14),
 			xalign = Enum.TextXAlignment.Center,
 		})
 		Ui.label(card, {
-			text = "+ " .. Ui.formatInt(p.value or 0),
+			text = "+ " .. Ui.formatInt(Ui.tonum(p.value, 0)),
 			textSize = 20,
 			font = Enum.Font.GothamBold,
 			color = "gold",
@@ -259,7 +272,10 @@ local function main(): ()
 			end
 			banner(
 				card,
-				("LEVEL %d — %s within reach"):format(math.floor(add.level), table.concat(names, ", ")),
+				("LEVEL %d — %s within reach"):format(
+					math.floor(add.level),
+					table.concat(names, ", ")
+				),
 				"gold",
 				true
 			)
@@ -279,6 +295,8 @@ local function main(): ()
 		-- ground impact: the bar shows where abundance AFTER landed, the pale
 		-- tick marks where it was BEFORE the cast. Rendering server numbers,
 		-- nothing more.
+		local abundanceAfter = math.clamp(Ui.tonum(p.abundanceAfter, 0), 0, 1)
+		local abundanceBefore = math.clamp(Ui.tonum(p.abundanceBefore, 0), 0, 1)
 		local captionRow = Ui.frame(card, {
 			name = "GroundCaption",
 			size = UDim2.new(1, 0, 0, 14),
@@ -290,7 +308,7 @@ local function main(): ()
 			font = Enum.Font.GothamBold,
 			color = "dim",
 		})
-		local pctLeft = math.clamp(math.floor((p.abundanceAfter or 0) * 100 + 0.5), 0, 100)
+		local pctLeft = math.floor(abundanceAfter * 100 + 0.5)
 		Ui.label(captionRow, {
 			text = tostring(pctLeft) .. "% left",
 			textSize = 9,
@@ -306,11 +324,11 @@ local function main(): ()
 			color = "deep",
 			corner = 3,
 		})
-		Ui.setMeter(meter, p.abundanceAfter or 0)
+		Ui.setMeter(meter, abundanceAfter)
 		Ui.frame(meter.track, {
 			name = "Before",
 			size = UDim2.new(0, 2, 1, 0),
-			pos = UDim2.fromScale(math.clamp(p.abundanceBefore or 0, 0, 1), 0),
+			pos = UDim2.fromScale(abundanceBefore, 0),
 			anchor = Vector2.new(0.5, 0),
 			color = "white",
 			transparency = 0.35,
@@ -345,12 +363,13 @@ local function main(): ()
 			transparency = 1,
 			zindex = 30,
 		})
-		Ui.connect(connections, overlay.Activated, function()
+		Ui.connect(cardConns, overlay.Activated, function()
 			if token == cardToken then
 				destroyCurrent()
 			end
 		end)
 
+		currentCardConns = cardConns
 		currentCard = card
 
 		task.delay(if celebrate then HOLD_CELEBRATE else HOLD_NORMAL, function()
@@ -381,11 +400,8 @@ local function main(): ()
 			return
 		end
 		local p = payload :: Types.OceanSyncPayload
-		local regions = p.regions or {}
-		for _, region in regions do
-			if type(region.id) == "string" then
-				regionNames[region.id] = tostring(region.name)
-			end
+		for _, region in Ui.normalizeRegions(p.regions) do
+			regionNames[region.id] = region.name
 		end
 	end
 

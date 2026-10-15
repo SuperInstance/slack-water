@@ -81,7 +81,11 @@ local function loadProfile(store: any, player: any): any
 		return store:GetAsync(datastoreKey(player))
 	end)
 	if not ok then
-		warn("[slack-water] profiles: load failed for " .. tostring(player.UserId) .. "; starting fresh")
+		warn(
+			"[slack-water] profiles: load failed for "
+				.. tostring(player.UserId)
+				.. "; starting fresh"
+		)
 		return nil
 	end
 	return data
@@ -103,7 +107,9 @@ local function saveProfile(svc: Service, player: any): boolean
 	if ok then
 		svc.dirty[player] = false
 	else
-		warn("[slack-water] profiles: save failed for " .. tostring(player.UserId) .. "; will retry")
+		warn(
+			"[slack-water] profiles: save failed for " .. tostring(player.UserId) .. "; will retry"
+		)
 	end
 	return ok
 end
@@ -172,7 +178,11 @@ local function onPlayerAdded(svc: Service, player: any): ()
 		-- the live session is newer than anything on disk; keep it and let
 		-- the next save reconcile, rather than overwriting earned xp.
 		if svc.dirty[player] then
-			warn("[slack-water] profiles: save raced a catch for " .. tostring(player.UserId) .. "; keeping the session")
+			warn(
+				"[slack-water] profiles: save raced a catch for "
+					.. tostring(player.UserId)
+					.. "; keeping the session"
+			)
 			sync(svc, player, nil)
 			return
 		end
@@ -250,7 +260,9 @@ function ProfileService.start(): Service
 		end
 		lastGearRequestAt[player] = now
 
-		local gearId = if typeof(payload) == "table" and type(payload.gearId) == "string" then payload.gearId else nil
+		local gearId = if typeof(payload) == "table" and type(payload.gearId) == "string"
+			then payload.gearId
+			else nil
 		if not gearId then
 			sync(svc, player, "malformed request")
 			return

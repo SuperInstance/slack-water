@@ -56,13 +56,29 @@ end
 
 local function assertEq(actual: any, expected: any, msg: string?)
 	if actual ~= expected then
-		error((msg or "values differ") .. " — expected " .. tostring(expected) .. ", got " .. tostring(actual), 2)
+		error(
+			(msg or "values differ")
+				.. " — expected "
+				.. tostring(expected)
+				.. ", got "
+				.. tostring(actual),
+			2
+		)
 	end
 end
 
 local function assertNear(actual: number, expected: number, tol: number, msg: string?)
 	if math.abs(actual - expected) > tol then
-		error((msg or "out of tolerance") .. " — expected " .. tostring(expected) .. " +/- " .. tostring(tol) .. ", got " .. tostring(actual), 2)
+		error(
+			(msg or "out of tolerance")
+				.. " — expected "
+				.. tostring(expected)
+				.. " +/- "
+				.. tostring(tol)
+				.. ", got "
+				.. tostring(actual),
+			2
+		)
 	end
 end
 
@@ -83,7 +99,13 @@ local function makeRegion(id: string, habitat: string, depth: number, richness: 
 end
 
 -- a catch record with everything defaulted but the numbers under test
-local function catchRec(yielded: number, effortUsed: number, abundanceBefore: number, speciesId: string?, tideQuality: number?): any
+local function catchRec(
+	yielded: number,
+	effortUsed: number,
+	abundanceBefore: number,
+	speciesId: string?,
+	tideQuality: number?
+): any
 	return {
 		speciesId = speciesId or "rockfish",
 		yielded = yielded,
@@ -142,7 +164,11 @@ suite("Progression — profile lifecycle", function()
 		assertEq(p.currentGearId, "handline")
 		assertNear(Progression.effortFor(p), Types.Gear.handline.effort, 1e-9)
 		assertTrue(Progression.owns(p, "handline"))
-		assertEq(Progression.STARTER_GEAR.id, "handline", "the derived starter should be the handline")
+		assertEq(
+			Progression.STARTER_GEAR.id,
+			"handline",
+			"the derived starter should be the handline"
+		)
 	end)
 
 	test("snapshot and restore round-trip a real profile", function()
@@ -157,7 +183,11 @@ suite("Progression — profile lifecycle", function()
 		assertEq(restored.xp, p.xp)
 		assertEq(restored.currentGearId, "gi")
 		assertNear(Progression.effortFor(restored), Types.Gear.gi.effort, 1e-9)
-		assertTrue(Progression.owns(restored, "handline") and Progression.owns(restored, "rod") and Progression.owns(restored, "gi"))
+		assertTrue(
+			Progression.owns(restored, "handline")
+				and Progression.owns(restored, "rod")
+				and Progression.owns(restored, "gi")
+		)
 
 		-- snapshotting the restore reproduces the same bytes
 		local snap2 = Progression.snapshot(restored)
@@ -182,7 +212,10 @@ suite("Progression — profile lifecycle", function()
 			ownedGear = { "rod", "trawler", "dragon", 7 },
 			currentGearId = "trawler",
 		})
-		assertFalse(Progression.owns(hacked, "trawler"), "gear above the saved level must be dropped")
+		assertFalse(
+			Progression.owns(hacked, "trawler"),
+			"gear above the saved level must be dropped"
+		)
 		assertFalse(Progression.owns(hacked, "dragon"), "unknown gear must be dropped")
 		assertTrue(Progression.owns(hacked, "rod"), "gear at or below the level is kept")
 		assertEq(hacked.currentGearId, "handline", "dropped gear cannot stay equipped")
@@ -239,10 +272,14 @@ suite("Progression — the xp curve", function()
 	end)
 
 	test("levelProgress fraction stays inside [0, 1) below the cap", function()
-		local p = Progression.restore({ xp = Progression.totalXpForLevel(Progression.MAX_LEVEL) + 100.0 })
+		local p =
+			Progression.restore({ xp = Progression.totalXpForLevel(Progression.MAX_LEVEL) + 100.0 })
 		local lp = Progression.levelProgress(p)
 		assertEq(lp.level, Progression.MAX_LEVEL)
-		assertTrue(lp.fraction >= 0.0 and lp.fraction < 1.0, "fraction out of band: " .. tostring(lp.fraction))
+		assertTrue(
+			lp.fraction >= 0.0 and lp.fraction < 1.0,
+			"fraction out of band: " .. tostring(lp.fraction)
+		)
 	end)
 end)
 
@@ -258,15 +295,23 @@ suite("Progression — xp shaping (the thesis)", function()
 		local poorRes: any = OceanSim.harvest(poor, "r1", "rockfish", 40)
 
 		assertTrue(freshRes ~= nil and poorRes ~= nil, "harvest returned nil")
-		local freshXp = Progression.xpForCatch(catchRec(freshRes.yielded, 40, freshRes.abundanceBefore))
-		local poorXp = Progression.xpForCatch(catchRec(poorRes.yielded, 40, poorRes.abundanceBefore))
+		local freshXp =
+			Progression.xpForCatch(catchRec(freshRes.yielded, 40, freshRes.abundanceBefore))
+		local poorXp =
+			Progression.xpForCatch(catchRec(poorRes.yielded, 40, poorRes.abundanceBefore))
 		assertTrue(
 			freshXp > poorXp * 3.0,
-			"picked-over ground must pay far less xp: " .. tostring(freshXp) .. " vs " .. tostring(poorXp)
+			"picked-over ground must pay far less xp: "
+				.. tostring(freshXp)
+				.. " vs "
+				.. tostring(poorXp)
 		)
 		-- and it is not just the smaller catch: per biomass landed, the fresh
 		-- ground is still the better teacher
-		assertTrue(freshXp / freshRes.yielded > poorXp / poorRes.yielded, "per-biomass xp must favour the fresh ground")
+		assertTrue(
+			freshXp / freshRes.yielded > poorXp / poorRes.yielded,
+			"per-biomass xp must favour the fresh ground"
+		)
 	end)
 
 	test("xp rises strictly with the ground's abundance", function()
@@ -316,7 +361,10 @@ suite("Progression — xp shaping (the thesis)", function()
 		assertEq(o1.level, o2.level)
 		assertEq(o1.levelsGained, o2.levelsGained)
 		assertEq(#o1.unlockedGear, #o2.unlockedGear)
-		assertEq(table.concat(Progression.snapshot(a).ownedGear, ","), table.concat(Progression.snapshot(b).ownedGear, ","))
+		assertEq(
+			table.concat(Progression.snapshot(a).ownedGear, ","),
+			table.concat(Progression.snapshot(b).ownedGear, ",")
+		)
 	end)
 end)
 
@@ -380,7 +428,10 @@ suite("Progression — gear gating and purchase", function()
 			currentGearId = "rod",
 		})
 		assertNear(Progression.effortFor(q), Types.Gear.rod.effort, 1e-9)
-		assertTrue(Progression.equip(q, "handline"), "dropping back to light tackle is the stewardship verb")
+		assertTrue(
+			Progression.equip(q, "handline"),
+			"dropping back to light tackle is the stewardship verb"
+		)
 		assertNear(Progression.effortFor(q), Types.Gear.handline.effort, 1e-9)
 	end)
 end)
@@ -395,7 +446,10 @@ suite("Progression — effort, finesse, and the handline's endgame", function()
 		assertTrue(#ordered >= 2, "the roster should have several tiers")
 		local lastEffort = -1.0
 		for _, gear in ordered do
-			assertTrue(gear.effort > lastEffort, "effort must rise with unlock level at " .. gear.id)
+			assertTrue(
+				gear.effort > lastEffort,
+				"effort must rise with unlock level at " .. gear.id
+			)
 			lastEffort = gear.effort
 		end
 	end)
@@ -414,7 +468,10 @@ suite("Progression — effort, finesse, and the handline's endgame", function()
 		for _, gear in gearByUnlock() do
 			local perCast = Progression.xpForCatch(catchRec(gear.effort, gear.effort, 1.0))
 			local perBiomass = perCast / gear.effort
-			assertTrue(perBiomass < lastPerBiomass, "xp per fish killed must fall with gear tier at " .. gear.id)
+			assertTrue(
+				perBiomass < lastPerBiomass,
+				"xp per fish killed must fall with gear tier at " .. gear.id
+			)
 			lastPerBiomass = perBiomass
 		end
 	end)
@@ -459,13 +516,20 @@ suite("Progression — recordCatch and level-ups", function()
 	test("a huge catch can jump several levels at once", function()
 		local p = Progression.restore({ xp = Progression.totalXpForLevel(2) - 1.0 })
 		local out = Progression.recordCatch(p, catchRec(2000, 6, 1.0))
-		assertTrue(out.levelsGained >= 5, "expected a multi-level jump, got " .. tostring(out.levelsGained))
+		assertTrue(
+			out.levelsGained >= 5,
+			"expected a multi-level jump, got " .. tostring(out.levelsGained)
+		)
 		assertEq(out.level, Progression.levelOf(p))
 		local ids = {}
 		for _, gear in out.unlockedGear do
 			table.insert(ids, gear.id)
 		end
-		assertEq(table.concat(ids, ","), "rod,gi,crab_pot,longline", "the unlock list must be complete and ordered")
+		assertEq(
+			table.concat(ids, ","),
+			"rod,gi,crab_pot,longline",
+			"the unlock list must be complete and ordered"
+		)
 	end)
 
 	test("at MAX_LEVEL xp still accrues but the level pins", function()
@@ -482,9 +546,13 @@ suite("Progression — recordCatch and level-ups", function()
 			local ocean = if hammerFirst then hammeredReef() else freshReef()
 			local profile = Progression.new()
 			for _ = 1, 10 do
-				local res: any = OceanSim.harvest(ocean, "r1", "rockfish", Progression.effortFor(profile))
+				local res: any =
+					OceanSim.harvest(ocean, "r1", "rockfish", Progression.effortFor(profile))
 				if res ~= nil then
-					Progression.recordCatch(profile, catchRec(res.yielded, Progression.effortFor(profile), res.abundanceBefore))
+					Progression.recordCatch(
+						profile,
+						catchRec(res.yielded, Progression.effortFor(profile), res.abundanceBefore)
+					)
 				end
 			end
 			return profile.xp

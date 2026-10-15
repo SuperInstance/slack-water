@@ -71,10 +71,12 @@ local function main(): ()
 		table.clear(rows)
 	end
 
-	-- entries arrive over the wire, so they are typed as `{ any }` exactly like
-	-- the server's own remote handlers; every field read below is guarded
-	local function rebuild(entries: { any }): ()
+	-- entries are normalized on arrival (Ui.normalizeMarketEntries), so every
+	-- field read here is a finite number or a known string; partial payloads
+	-- and wrong-typed fields were dropped or defaulted before rendering
+	local function rebuild(entries: { Ui.MarketRow }): ()
 		destroyRows()
+		emptyLabel.Text = "waiting for the market…"
 
 		if #entries == 0 then
 			emptyLabel.Visible = true
@@ -85,18 +87,19 @@ local function main(): ()
 		-- richest first: the top of the list is the answer to "what pays"
 		local sorted = table.clone(entries)
 		table.sort(sorted, function(a, b)
-			return (a.price or 0) > (b.price or 0)
+			return a.price > b.price
 		end)
 
 		for index, entry in sorted do
 			local rising = entry.direction == "rising"
 			local scarce = Market.isScarce({
 				speciesId = entry.speciesId,
+				displayName = entry.displayName,
 				price = entry.price,
 				baseValue = entry.baseValue,
 				scarcityMultiplier = entry.scarcityMultiplier,
 				globalAbundance = entry.globalAbundance,
-				direction = entry.direction,
+				direction = entry.direction :: any,
 			})
 
 			local row = Ui.frame(scroll, {
@@ -112,14 +115,14 @@ local function main(): ()
 			})
 
 			Ui.label(row, {
-				text = entry.displayName or entry.speciesId,
+				text = entry.displayName,
 				textSize = 13,
 				font = Enum.Font.GothamBold,
 				size = UDim2.new(1, -84, 0, 16),
 				pos = UDim2.fromOffset(10, 5),
 			})
 			Ui.label(row, {
-				text = Ui.formatInt(entry.price or 0),
+				text = Ui.formatInt(entry.price),
 				textSize = 13.5,
 				font = Enum.Font.GothamBold,
 				color = if rising then "gold" else "text",
@@ -131,11 +134,11 @@ local function main(): ()
 
 			-- the multiplier is the market's story: ×1 is plenty, ×6 is a
 			-- collapse someone is still being paid for
-			local pct = math.clamp(math.floor((entry.globalAbundance or 0) * 100 + 0.5), 0, 100)
+			local pct = math.clamp(math.floor(entry.globalAbundance * 100 + 0.5), 0, 100)
 			Ui.label(row, {
 				text = string.format(
 					"×%.1f scarcity · %d%% of the ocean",
-					entry.scarcityMultiplier or 1,
+					entry.scarcityMultiplier,
 					pct
 				),
 				textSize = 10.5,
@@ -164,28 +167,58 @@ local function main(): ()
 	-- Server payloads
 	--
 	-- Rows are only rebuilt while the sheet is closed-open cycles stay cheap;
-	-- a hidden panel has no business churning instances every sync.
+	-- a hidden panel has no business churning instances every sync. A feed
+	-- that stops arriving must not leave its last prices reading as live.
 	-- ---------------------------------------------------------------------------
 
-	local latest: { any } = {}
+	local MARKET_STALE_AFTER = 30 -- MarketSync rides the same 5 s broadcast loop
+	local latest: { Ui.MarketRow } = {}
+	local lastSyncAt = 0
+
+	local function feedStale(): boolean
+		return lastSyncAt > 0 and os.clock() - lastSyncAt > MARKET_STALE_AFTER
+	end
+
+	local function renderCurrent(): ()
+		if feedStale() then
+			destroyRows()
+			emptyLabel.Text = "market out of date — showing nothing"
+			emptyLabel.Visible = true
+			return
+		end
+		rebuild(latest)
+	end
 
 	local function onMarketSync(payload: any)
 		if typeof(payload) ~= "table" then
 			return
 		end
 		local p = payload :: Types.MarketSyncPayload
-		latest = p.entries or {}
+		lastSyncAt = os.clock()
+		latest = Ui.normalizeMarketEntries((p :: any).entries)
 		if sheet.isOpen then
-			rebuild(latest)
+			renderCurrent()
 		end
 	end
 
 	local open = sheet.open
 	local sheetOpen = function(self: Ui.Sheet)
 		open(self)
-		rebuild(latest)
+		renderCurrent()
 	end
 	sheet.open = sheetOpen
+
+	-- while the sheet is open, a dead feed switches it to its out-of-date
+	-- state without waiting for the player to close and reopen it
+	local alive = true
+	task.spawn(function()
+		while alive do
+			task.wait(5)
+			if alive and sheet.isOpen and feedStale() then
+				renderCurrent()
+			end
+		end
+	end)
 
 	task.spawn(function()
 		for _ = 1, 15 do
@@ -199,6 +232,7 @@ local function main(): ()
 	end)
 
 	Ui.connect(connections, gui.Destroying, function()
+		alive = false
 		Ui.disconnectAll(connections)
 	end)
 end

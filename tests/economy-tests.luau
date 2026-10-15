@@ -52,13 +52,29 @@ end
 
 local function assertEq(actual: any, expected: any, msg: string?)
 	if actual ~= expected then
-		error((msg or "values differ") .. " — expected " .. tostring(expected) .. ", got " .. tostring(actual), 2)
+		error(
+			(msg or "values differ")
+				.. " — expected "
+				.. tostring(expected)
+				.. ", got "
+				.. tostring(actual),
+			2
+		)
 	end
 end
 
 local function assertNear(actual: number, expected: number, tol: number, msg: string?)
 	if math.abs(actual - expected) > tol then
-		error((msg or "out of tolerance") .. " — expected " .. tostring(expected) .. " +/- " .. tostring(tol) .. ", got " .. tostring(actual), 2)
+		error(
+			(msg or "out of tolerance")
+				.. " — expected "
+				.. tostring(expected)
+				.. " +/- "
+				.. tostring(tol)
+				.. ", got "
+				.. tostring(actual),
+			2
+		)
 	end
 end
 
@@ -93,7 +109,11 @@ suite("BankSpec — validation", function()
 		assertEq(bank.name, "Slack Water Flats")
 		assertEq(bank.depth, 120)
 		assertEq(bank.habitat, "sand")
-		assertEq(#report.repairs, 0, "no repairs expected, got: " .. table.concat(report.repairs, "; "))
+		assertEq(
+			#report.repairs,
+			0,
+			"no repairs expected, got: " .. table.concat(report.repairs, "; ")
+		)
 	end)
 
 	test("non-object payloads are rejected", function()
@@ -135,18 +155,27 @@ suite("BankSpec — validation", function()
 	end)
 
 	test("unknown species are dropped", function()
-		local report = BankSpec.validate(validBank({
-			speciesMix = { { speciesId = "flounder", weight = 1 }, { speciesId = "dragon", weight = 2 } },
-		}), "b")
+		local report = BankSpec.validate(
+			validBank({
+				speciesMix = {
+					{ speciesId = "flounder", weight = 1 },
+					{ speciesId = "dragon", weight = 2 },
+				},
+			}),
+			"b"
+		)
 		assertTrue(report.ok, "should survive with one valid species")
 		assertEq(#report.bank.speciesMix, 1)
 		assertEq(report.bank.speciesMix[1].speciesId, "flounder")
 	end)
 
 	test("a mix of only unknown species is rejected", function()
-		local report = BankSpec.validate(validBank({
-			speciesMix = { { speciesId = "dragon", weight = 1 } },
-		}), "b")
+		local report = BankSpec.validate(
+			validBank({
+				speciesMix = { { speciesId = "dragon", weight = 1 } },
+			}),
+			"b"
+		)
 		assertFalse(report.ok, "no valid species should reject")
 	end)
 
@@ -156,9 +185,15 @@ suite("BankSpec — validation", function()
 	end)
 
 	test("species weights are normalised to sum to 1", function()
-		local report = BankSpec.validate(validBank({
-			speciesMix = { { speciesId = "flounder", weight = 3 }, { speciesId = "skate", weight = 1 } },
-		}), "b")
+		local report = BankSpec.validate(
+			validBank({
+				speciesMix = {
+					{ speciesId = "flounder", weight = 3 },
+					{ speciesId = "skate", weight = 1 },
+				},
+			}),
+			"b"
+		)
 		assertTrue(report.ok)
 		local sum = 0.0
 		for _, entry in report.bank.speciesMix do
@@ -168,9 +203,15 @@ suite("BankSpec — validation", function()
 	end)
 
 	test("zero and negative weights are discarded", function()
-		local report = BankSpec.validate(validBank({
-			speciesMix = { { speciesId = "flounder", weight = -5 }, { speciesId = "skate", weight = 0 } },
-		}), "b")
+		local report = BankSpec.validate(
+			validBank({
+				speciesMix = {
+					{ speciesId = "flounder", weight = -5 },
+					{ speciesId = "skate", weight = 0 },
+				},
+			}),
+			"b"
+		)
 		assertFalse(report.ok, "all-zero weights should reject")
 	end)
 end)
@@ -189,7 +230,10 @@ suite("BankSpec — name sanitization", function()
 	end)
 
 	test("punctuation outside the allowed set falls back", function()
-		assertEq(BankSpec.validate(validBank({ name = "<script>alert</script>" }), "b").bank.name, "Unnamed Ground")
+		assertEq(
+			BankSpec.validate(validBank({ name = "<script>alert</script>" }), "b").bank.name,
+			"Unnamed Ground"
+		)
 	end)
 
 	test("real place names survive intact", function()
@@ -198,7 +242,10 @@ suite("BankSpec — name sanitization", function()
 	end)
 
 	test("whitespace is collapsed", function()
-		assertEq(BankSpec.validate(validBank({ name = "Outer   Kelp    Bed" }), "b").bank.name, "Outer Kelp Bed")
+		assertEq(
+			BankSpec.validate(validBank({ name = "Outer   Kelp    Bed" }), "b").bank.name,
+			"Outer Kelp Bed"
+		)
 	end)
 
 	test("non-string names fall back", function()
@@ -217,12 +264,18 @@ suite("BankSpec — toRegion", function()
 	end)
 
 	test("a rare-species mix produces a richer ground than a common one", function()
-		local common = BankSpec.validate(validBank({
-			speciesMix = { { speciesId = "herring", weight = 1 } },
-		}), "b")
-		local rare = BankSpec.validate(validBank({
-			speciesMix = { { speciesId = "kingcrab", weight = 1 } },
-		}), "b")
+		local common = BankSpec.validate(
+			validBank({
+				speciesMix = { { speciesId = "herring", weight = 1 } },
+			}),
+			"b"
+		)
+		local rare = BankSpec.validate(
+			validBank({
+				speciesMix = { { speciesId = "kingcrab", weight = 1 } },
+			}),
+			"b"
+		)
 		local commonRichness = BankSpec.toRegion(common.bank).richness
 		local rareRichness = BankSpec.toRegion(rare.bank).richness
 		assertTrue(rareRichness > commonRichness, "rare species should imply a richer ground")
@@ -247,7 +300,12 @@ suite("Market — scarcity", function()
 
 	test("multiplier is capped so collapse is not a money printer", function()
 		local extreme = Market.scarcityMultiplier(0.0)
-		assertNear(extreme, Config.MAX_SCARCITY_MULTIPLIER, 0.001, "zero abundance should sit at the cap")
+		assertNear(
+			extreme,
+			Config.MAX_SCARCITY_MULTIPLIER,
+			0.001,
+			"zero abundance should sit at the cap"
+		)
 		assertTrue(extreme <= Config.MAX_SCARCITY_MULTIPLIER, "must respect the cap")
 	end)
 
@@ -280,7 +338,10 @@ suite("Market — response", function()
 			Market.updateSpecies(market, "halibut", 0.2)
 		end
 		local after = market.entries["halibut"].price
-		assertTrue(after > before, "price should climb as stock falls: " .. tostring(before) .. " -> " .. tostring(after))
+		assertTrue(
+			after > before,
+			"price should climb as stock falls: " .. tostring(before) .. " -> " .. tostring(after)
+		)
 		-- once the price has settled at the new scarcity level it is flat again
 		assertEq(market.entries["halibut"].direction, "flat", "settled price should be flat")
 	end)
@@ -320,13 +381,24 @@ suite("Market — response", function()
 	test("updateAll refreshes every species from an abundance table", function()
 		local market = Market.new()
 		Market.updateAll(market, { rockfish = 0.25 })
-		assertTrue(market.entries["rockfish"].scarcityMultiplier > 1.0, "rockfish should carry a premium")
-		assertNear(market.entries["herring"].price, Species.get("herring").baseValue, 1e-6, "unspecified species unchanged")
+		assertTrue(
+			market.entries["rockfish"].scarcityMultiplier > 1.0,
+			"rockfish should carry a premium"
+		)
+		assertNear(
+			market.entries["herring"].price,
+			Species.get("herring").baseValue,
+			1e-6,
+			"unspecified species unchanged"
+		)
 	end)
 
 	test("unknown species does not crash the market", function()
 		local market = Market.new()
-		assertTrue(Market.updateSpecies(market, "dragon", 0.5) == nil, "unknown species should return nil")
+		assertTrue(
+			Market.updateSpecies(market, "dragon", 0.5) == nil,
+			"unknown species should return nil"
+		)
 		assertNear(Market.priceOf(market, "dragon"), 0.0, 1e-9)
 	end)
 
@@ -405,7 +477,10 @@ suite("Regions — generation", function()
 			assertTrue(range ~= nil, "unknown habitat " .. tostring(region.habitat))
 			assertTrue(
 				region.depth >= range[1] and region.depth <= range[2],
-				"depth out of habitat range for " .. region.habitat .. ": " .. tostring(region.depth)
+				"depth out of habitat range for "
+					.. region.habitat
+					.. ": "
+					.. tostring(region.depth)
 			)
 			assertTrue(region.richness >= 0.5 and region.richness <= 1.5, "richness out of band")
 			assertEq(region.origin, "procedural")

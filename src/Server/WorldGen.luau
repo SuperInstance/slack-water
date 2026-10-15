@@ -22,6 +22,17 @@
 	- the grounds have to be in the field of view from the spawn, or "empty
 	  world" and "world you have not turned around to look at" are
 	  indistinguishable.
+
+	There is also water now (OceanSurface, built at the end of build()).
+	That changed two relationships this file owns:
+
+	- grounds are placed BY DEPTH under the datum (y = 0 = MLLW) instead of
+	  all at y = 0, so a shallow shoal can genuinely dry out at low water —
+	  the mechanic the whole game rests on, made visible;
+	- the boat FLOATS: it is pivoted by the same tide term the surface sits
+	  on (OceanSurface.ride), so freeboard is constant while the whole scene
+	  rises and falls over a cycle. A fixed deck would be a pier, not a
+	  boat, and would go under at springs.
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -29,8 +40,10 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local OceanSim = require(Shared.Ocean.OceanSim)
-
-local WorldGen = {}
+local Waves = require(Shared.Ocean.Waves)
+local Water = require(Shared.Ocean.Water)
+local OceanSurface = require(script.Parent.OceanSurface)
+local OceanService = require(script.Parent.OceanService)
 
 -- Distance between grounds on the grid. Kept tight enough that several are
 -- visible from the boat at once.
@@ -73,6 +86,13 @@ end
 --- This exists purely so nobody falls out of the world. It is also, not
 --- coincidentally, a boat: it is where you cast from, and it frames every
 --- screenshot of the game.
+---
+--- The hull is drawn DEEP on purpose: its designed waterline is y = 0 (the
+--- same datum the tide and the grounds are charted from), so it floats with
+--- the deck clear of everything but a storm's crests — and the whole model
+--- is pivoted by the tide via OceanSurface.ride, so it stays that way at
+--- every state of the tide instead of being a fixed platform the sea rises
+--- over.
 function WorldGenService.buildDeck(folder: any): any
 	local deck = Instance.new("Model")
 	deck.Name = "FVEileen"
@@ -82,8 +102,8 @@ function WorldGenService.buildDeck(folder: any): any
 	-- worse to stand on.
 	local hull = Instance.new("Part")
 	hull.Name = "Deck"
-	hull.Size = Vector3.new(24, 3, 24)
-	hull.CFrame = CFrame.new(0, 2, 0)
+	hull.Size = Vector3.new(24, 5.5, 24)
+	hull.CFrame = CFrame.new(0, 0.75, 0) -- spans y -2 .. +3.5; waterline at 0
 	hull.Anchored = true
 	hull.CanCollide = true
 	hull.Material = Enum.Material.WoodPlanks
@@ -120,14 +140,39 @@ function WorldGenService.buildDeck(folder: any): any
 	mast.Transparency = 0.25
 	mast.Parent = deck
 
+	-- A floating pontoon out to where arrivals land. Main drops every
+	-- character at (0, 40, 90): before the ocean existed that put them on
+	-- the bare rescue floor 60-odd studs down; with water there it would
+	-- dump them in the drink with no way back onto the boat. The pontoon
+	-- makes arrival read as a harbour instead of a bug — and because it is
+	-- part of the boat model it rides the tide with it.
+	local dock = Instance.new("Part")
+	dock.Name = "Dock"
+	dock.Size = Vector3.new(8, 2, 104)
+	dock.CFrame = CFrame.new(0, 2.5, 64) -- spans z 12..116; top level with the deck
+	dock.Anchored = true
+	dock.CanCollide = true
+	dock.Material = Enum.Material.WoodPlanks
+	dock.Color = Color3.fromRGB(104, 92, 78)
+	dock.TopSurface = Enum.SurfaceType.Smooth
+	dock.BottomSurface = Enum.SurfaceType.Smooth
+	dock.CastShadow = false
+	dock.Parent = deck
+
 	deck:SetPrimaryPart(hull)
 	deck.Parent = folder
 
 	return deck
 end
 
---- A spawn point on the deck, so the player arrives here rather than at the
---- world origin falling through the ocean.
+--- A spawn point beside the deck, so the player arrives here rather than at
+--- the world origin falling through the ocean.
+---
+--- A DIRECT child of the Ocean folder on purpose — the boot smoke test finds
+--- it there — and registered with OceanSurface.ride() separately from the
+--- boat, so it still floats with the tide. (Parented into the boat model it
+--- would ride automatically, but then it stops being findable where the rest
+--- of the world looks for it.)
 function WorldGenService.buildSpawn(folder: any): any
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Name = "Spawn"
@@ -147,6 +192,11 @@ end
 --- A large non-colliding plane far below everything. If a player does fall, they
 --- land here instead of falling forever — a cheap rescue that turns an
 --- unrecoverable bug into a visible one.
+---
+--- It doubles as the deep bottom beyond the surface's edge (the water grid is
+--- 780 studs; this plane is 1200), so it is painted the deep-water colour
+--- rather than sand: where the surface ends, the floor should keep reading as
+--- "deep sea below fog", not switch to a beach.
 function WorldGenService.buildFloor(folder: any): any
 	local floor = Instance.new("Part")
 	floor.Name = "SeaFloor"
@@ -154,8 +204,8 @@ function WorldGenService.buildFloor(folder: any): any
 	floor.CFrame = CFrame.new(0, -60, 0)
 	floor.Anchored = true
 	floor.CanCollide = true
-	floor.Material = Enum.Material.Sand
-	floor.Color = Color3.fromRGB(70, 66, 54)
+	floor.Material = Enum.Material.Slate
+	floor.Color = Color3.new(Water.DEEP[1], Water.DEEP[2], Water.DEEP[3])
 	floor.TopSurface = Enum.SurfaceType.Smooth
 	floor.BottomSurface = Enum.SurfaceType.Smooth
 	floor.CastShadow = false
@@ -183,8 +233,8 @@ function WorldGenService.build(ocean: any): ()
 	end
 
 	WorldGenService.buildFloor(folder)
-	WorldGenService.buildDeck(folder)
-	WorldGenService.buildSpawn(folder)
+	local deck = WorldGenService.buildDeck(folder)
+	local spawn = WorldGenService.buildSpawn(folder)
 
 	for index, regionId in ocean.order do
 		local region = OceanSim.getRegion(ocean, regionId)
@@ -192,6 +242,22 @@ function WorldGenService.build(ocean: any): ()
 			WorldGenService.buildRegion(folder, region, index)
 		end
 	end
+
+	-- The surface goes on LAST: it scans the built grounds to derive the
+	-- depth field its colour and foam respond to. The clock reads the
+	-- simulation hour straight from OceanService, because the hour lives on
+	-- the service (the ocean state itself only tracks month/day for the
+	-- runs) and Main is not ours to change the call signature of.
+	OceanSurface.start(ocean, function()
+		local svc = OceanService.get()
+		return if svc then svc.hour else 0.0
+	end)
+
+	-- The boat floats on the tide the surface sits on, and so does the
+	-- spawn. Registered after start() so a rebuild's fresh rider list picks
+	-- up the fresh instances.
+	OceanSurface.ride(deck)
+	OceanSurface.ride(spawn)
 
 	print(string.format("[slack-water] worldgen: %d region(s) placed", #ocean.order))
 end
@@ -213,6 +279,16 @@ function WorldGenService.buildRegion(parent: any, region: any, index: number): a
 	marker:SetAttribute("depth", region.depth)
 	marker:SetAttribute("origin", region.origin)
 
+	-- Display depth below the datum: effectively linear near the surface
+	-- (which is what lets a 2 m shoal genuinely dry out at low water) and
+	-- compressed with depth so a 500 m basin is still visible from the
+	-- boat. See Waves.depthToStuds for the curve and its honesty note.
+	local topY = -Waves.depthToStuds(region.depth)
+	-- the surface's colour/foam pass reads this instead of recomputing the
+	-- layout, so renderer and grounds can never disagree about where the
+	-- floor is
+	marker:SetAttribute("floorY", topY)
+
 	-- A single flat disc is enough to read as a fishing ground from a distance
 	-- and costs almost nothing to stream. It is NOT collidable: the player is
 	-- on a boat, not wading.
@@ -220,7 +296,7 @@ function WorldGenService.buildRegion(parent: any, region: any, index: number): a
 	disc.Name = "Ground"
 	disc.Shape = Enum.PartType.Cylinder
 	disc.Size = Vector3.new(2, 46, 46)
-	disc.CFrame = CFrame.new(originX, 0, originZ) * CFrame.Angles(0, 0, math.rad(90))
+	disc.CFrame = CFrame.new(originX, topY - 1, originZ) * CFrame.Angles(0, 0, math.rad(90))
 	disc.Color = color
 	disc.Material = Enum.Material.Slate
 	disc.Anchored = true

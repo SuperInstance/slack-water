@@ -104,7 +104,9 @@ end
 --- Local extrema of the tide around a given hour, by bisection over the
 --- derivative. Returns { high, highTime, low, lowTime } — the next high water
 --- and the next low water — which is what a skipper actually plans around.
-function Tide.nextEvents(hour: number): { high: number, highTime: number, low: number, lowTime: number }
+function Tide.nextEvents(
+	hour: number
+): { high: number, highTime: number, low: number, lowTime: number }
 	-- derivative sign tells us which way the curve is moving
 	local function rising(at: number): boolean
 		return Tide.heightAt(at + 0.02) > Tide.heightAt(at - 0.02)
@@ -113,7 +115,11 @@ function Tide.nextEvents(hour: number): { high: number, highTime: number, low: n
 	local function bisectHeight(lo: number, hi: number, wantHigh: boolean): number
 		for _ = 1, 40 do
 			local mid = (lo + hi) / 2
-			if rising(mid) == wantHigh then lo = mid else hi = mid end
+			if rising(mid) == wantHigh then
+				lo = mid
+			else
+				hi = mid
+			end
 		end
 		return (lo + hi) / 2
 	end
@@ -135,7 +141,7 @@ function Tide.nextEvents(hour: number): { high: number, highTime: number, low: n
 				local at = bisectHeight(prev, t, true)
 				return Tide.heightAt(at), at
 			end
-			if (not wantHigh) and (not wasRising) and isRising then
+			if (not wantHigh) and not wasRising and isRising then
 				local at = bisectHeight(prev, t, false)
 				return Tide.heightAt(at), at
 			end
@@ -220,7 +226,8 @@ function Tide.fishingQuality(chartedDepth: number, hour: number): number
 	local condition = 1.0 - current
 
 	-- being slightly deeper than the minimum is better than scraping it
-	local margin = math.clamp((water - Config.TIDE_MIN_DRAUGHT) / Config.TIDE_DEPTH_MARGIN, 0.0, 1.0)
+	local margin =
+		math.clamp((water - Config.TIDE_MIN_DRAUGHT) / Config.TIDE_DEPTH_MARGIN, 0.0, 1.0)
 
 	return math.clamp(condition * (0.55 + 0.45 * margin), 0.0, 1.0)
 end

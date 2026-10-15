@@ -132,12 +132,17 @@ local function main(): ()
 	})
 
 	local rows: { Frame } = {}
+	-- equip-overlay connections belong to the rows, not the panel: rebuilds
+	-- happen on every ProfileSync while the sheet is open, and connections to
+	-- destroyed rows would otherwise pile up in the panel tracker forever
+	local rowConns: Ui.Conns = {}
 
 	-- filled by the remote-wait loop below; a tap before the server has
 	-- built the remote simply does nothing rather than yielding a handler
 	local gearRequestRemote: RemoteEvent? = nil
 
 	local function destroyRows(): ()
+		Ui.disconnectAll(rowConns)
 		for _, row in rows do
 			row:Destroy()
 		end
@@ -205,8 +210,10 @@ local function main(): ()
 
 			local subText: string
 			if isLocked then
-				subText = "🔒 reached at level " .. tostring(gear.unlockLevel)
-					.. " · price " .. Ui.formatInt(gear.price)
+				subText = "🔒 reached at level "
+					.. tostring(gear.unlockLevel)
+					.. " · price "
+					.. Ui.formatInt(gear.price)
 			elseif isOwned then
 				subText = "effort " .. tostring(gear.effort)
 			else
@@ -241,7 +248,7 @@ local function main(): ()
 					zindex = 3,
 				})
 				local gearId = gear.id
-				Ui.connect(connections, overlay.Activated, function()
+				Ui.connect(rowConns, overlay.Activated, function()
 					local request = gearRequestRemote
 					if request then
 						request:FireServer({ gearId = gearId })

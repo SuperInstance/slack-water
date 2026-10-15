@@ -125,4 +125,20 @@ Config.HOURS_PER_DAY = 24
 Config.INITIAL_REGIONS = 14
 Config.BANKS_PER_ROUND = 2
 
+--=============================================================================
+-- Casting
+--=============================================================================
+
+-- Seconds a player must wait between starting one cast and starting the next.
+--
+-- This was MISSING until the server boot smoke test (tests/run-boot.sh) caught
+-- the consequence: CastService.isRateLimited compared against this nil, so
+-- `now - last < nil` threw on the first CastRequest and every cast in the game
+-- errored out. The number was always assumed and never written down.
+--
+-- Deliberately generous. A cast involves a real minigame, so nobody reaches
+-- this by playing normally — it exists so a client cannot drain a shared
+-- fishery in a tight loop, not to gate honest players.
+Config.CAST_COOLDOWN = 2.0
+
 return Config

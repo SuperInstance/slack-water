@@ -231,7 +231,8 @@ function Progression.xpForCatch(rec: CatchRecord): number
 	-- effort at or below the reference earns no bonus above 1; effort above
 	-- it earns progressively less per unit of biomass taken
 	local effort = math.max(rec.effortUsed, 0.0)
-	local finesse = (FINESSE_REFERENCE / math.max(effort, FINESSE_REFERENCE)) ^ Progression.FINESSE_EXPONENT
+	local finesse = (FINESSE_REFERENCE / math.max(effort, FINESSE_REFERENCE))
+		^ Progression.FINESSE_EXPONENT
 
 	local tide = if rec.tideQuality ~= nil then math.clamp(rec.tideQuality, 0.0, 1.0) else 0.0
 	local tideWeight = 1.0 + Progression.XP_TIDE_BONUS * tide

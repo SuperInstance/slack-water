@@ -10,15 +10,15 @@ server stays the sole authority on time.
 
 | File | What it is |
 | --- | --- |
-| `Ui.luau` | Shared construction kit: typed instance builders, theme, meters/chips/sheets, connection tracking, and the `GameClock` extrapolator. A ModuleScript required by all panels via `script.Parent.Ui`. |
-| `HUD.client.luau` | Persistent top-left readout: region, tide phase (`Tide.phaseName`), calendar (`month`/`day` from OceanSync), session running total (sum of CastResult values). |
-| `TideStrip.client.luau` | The tide for the next ~12 game hours: 42-bar curve, gold slack stretches, "now" marker, next slack window with a real-time countdown, next HW/LW. |
+| `Ui.luau` | Shared construction kit: typed instance builders, theme, meters/chips/sheets, connection tracking, wire-payload normalization (`normalizeRegions`/`normalizeMarketEntries`), and the `GameClock` extrapolator. A ModuleScript required by all panels via `script.Parent.Ui`; its top level stays pure so it loads under the standalone interpreter and is unit-tested by `tests/client-tests.luau`. |
+| `HUD.client.luau` | Persistent top-left readout: region, tide phase (`Tide.phaseName`), calendar (`month`/`day` from OceanSync), session running total (sum of CastResult values). Also the system's connection status: `no ocean` when no sync ever lands, `lost the ocean` when syncs stop, and a SHARED OCEAN / LOCAL WATER tag from `OceanSync.shared`. |
+| `TideStrip.client.luau` | The tide for the next ~12 game hours: 42-bar curve, gold slack stretches, "now" marker, next slack window with a real-time countdown, next HW/LW. Anchored on the server's own `tide.hour`, never a client-side conversion. |
 | `CatchCard.client.luau` | The cast result: species, weight, value, and the four flags with distinct treatments — `inRun`/`rare` celebrate (gold), `contested` warns (amber), `depleted` is a quiet gut-punch (red banner + recovery note, never a bare number). Tap to dismiss. |
-| `MarketPanel.client.luau` | MarketSync list, sorted by price. `RISING ▲` rows get a gold edge; scarce species (Shared `Market.isScarce` on server-sent numbers) get a red SCARCE chip. That callout *is* the player's routing decision. |
-| `RegionChart.client.luau` | OceanSync grounds list, sorted richest-first: name, habitat (colour-stable across the UI), charted depth, what is present, and an abundance bar colour-coded against `Config.COLLAPSE_THRESHOLD`. Below-threshold grounds read `PICKED OVER`; any contested species flags `⚔ CONTESTED`. |
+| `MarketPanel.client.luau` | MarketSync list, sorted by price. `RISING ▲` rows get a gold edge; scarce species (Shared `Market.isScarce` on server-sent numbers) get a red SCARCE chip. That callout *is* the player's routing decision. Switches to an out-of-date state if the feed stops. |
+| `RegionChart.client.luau` | OceanSync grounds list, sorted richest-first: name, habitat (colour-stable across the UI), charted depth, what is present, and an abundance bar colour-coded against `Config.COLLAPSE_THRESHOLD`. Below-threshold grounds read `PICKED OVER`; any contested species flags `⚔ CONTESTED`; grounds the tide has cut off dim and read `WAIT FOR TIDE`; unsurveyed grounds carry a `~` suffix and the subtitle shows the server's `% of chart surveyed`. |
 | `Notify.client.luau` | Toasts from Notify payloads (kinds: run/scarcity/contest/market/discover, each with its own icon+colour), plus RegionDiscovered mapped to a `discover` toast. Max 4 stacked, auto-dismiss. |
 | `GearBar.client.luau` | The skipper's career sheet: level, xp bar and the gear ladder from ProfileSync (server-computed, sent to this player only). Owned gear rows send a `GearRequest` and re-render whatever the server answers; locked rows show the level requirement. Never computes effort or predicts yield. |
-| `Casting.client.luau` | **Owned by another agent — do not edit here.** It is the fight minigame's state machine and creates no UI, so it neither collides with nor is referenced by these panels. |
+| `Casting.client.luau` | **Owned by another agent — do not edit here.** It is the fight minigame's state machine and creates no UI, so it neither collides with nor is referenced by these panels. As of 2026-10-14 nothing starts it — see `docs/PLAYLOOP.md` defect 1: the cast loop has no driver. |
 
 ## Layout (designed at 390x844, scaled everywhere else)
 
@@ -61,19 +61,28 @@ when present, so older payloads still lay out.
 
 ## How the client knows "what time is it"
 
-OceanSync (`month`, `day`, `tick`) arrives every ~5 s; the tide must move
-smoothly between syncs. `Ui.GameClock`:
+OceanSync (`month`, `day`, `tick`, and the server's own `tide.hour`) arrives
+every ~5 s; the tide must move smoothly between syncs. `Ui.GameClock`:
 
-- converts `tick` to absolute game hours via
-  `Config.HOURS_PER_DAY / Config.TICKS_PER_DAY` (currently 2 h per tick),
-- coasts between syncs on `os.clock`,
-- **measures** real-seconds-per-tick from consecutive syncs (default 20 s,
-  matching `OceanService._TICK_INTERVAL`) so countdowns stay honest if the
-  server cadence is retuned, and re-anchors if the server restarts
-  (tick goes backwards).
+- **anchors on the server's `tide.hour`** — the same number
+  `OceanService.harvest` gates casts against. The clock never converts
+  `tick` on its own; it once did, at `HOURS_PER_DAY / TICKS_PER_DAY` = 2
+  hours per tick while the server advances its hour by 1.0 per tick, and the
+  HUD spent its life promising slack water the server had not reached.
+- coasts between syncs on `os.clock`;
+- **measures** game-hours-per-real-second over a rolling window (default
+  1 h per 20 s, matching `OceanService._TICK_INTERVAL`) so countdowns stay
+  honest if the server cadence is retuned — and measures the *average*, not
+  the step, because the broadcast runs four times per tick;
+- unwraps the midnight rollover so coasting stays continuous, and treats an
+  hour that jumps backwards (a server restart) as a re-anchor, not motion;
+- re-anchors on `tide.hour` every sync, so it can never drift for more than
+  one broadcast interval.
 
 All tide rendering is derived from `Ui.clockHour(clock)` and the pure `Tide`
-module — nothing feeds back into game state.
+module — nothing feeds back into game state. When syncs stop arriving the
+HUD and TideStrip say so explicitly and blank their numbers rather than
+animating a dead clock as if it were live.
 
 ## Verifying in Studio
 
@@ -126,6 +135,12 @@ payload above.
 
 ## Known gaps
 
+- **The cast loop has no driver** — the single biggest gap in the game.
+  `Casting.client.luau` is a state machine nothing starts: no aim UI, no
+  cast button, no caller of `beginFight`. See `docs/PLAYLOOP.md` for the
+  full trace and the server-side breakages that sit behind it
+  (`Config.CAST_COOLDOWN` missing, `performance` unguarded, the broken
+  RegionDiscovered listener in Main).
 - **Buying gear is not wired.** `Progression.buy` exists and validates level +
   funds, but the server has no wallet/money store to deduct from, so GearBar
   only ever *equips* gear the profile already owns. Locked rows honestly show
@@ -135,12 +150,14 @@ payload above.
   the HUD cluster until the game disables it with
   `StarterGui:SetCoreGuiEnabled`; that call belongs to game bootstrap, not to
   a panel.
-- **`day` is currently static on the server** — `OceanService` ticks but never
-  calls `OceanSim.advanceDay`, so the HUD date stays at `day 1/4` on a fresh
-  server. The HUD renders what it is sent; the fix belongs server-side.
 - **`contested` arrives empty** from `broadcastOcean` (the map is always
   `{}`), so GROUNDS never shows `⚔ CONTESTED` from syncs — only the CatchCard
   flag can show it today. Again a server gap, not a panel one.
+- **Keep/sell does not exist.** The CatchCard is dismiss-only; there is no
+  sell remote in `Types.luau` and no wallet to pay into. The HUD total is a
+  client-side session sum, display only.
+- **`run` and `market` toasts never fire** — no server code sends those
+  Notify kinds (only contest/scarcity from CastService).
 - Icons are emoji by choice: zero asset dependencies while the layout is
   being proven (the art language is placeholder project-wide, see the root
   README).

@@ -15,6 +15,15 @@ local Players = game:GetService("Players")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+
+-- NOTE: `Shared.Types` on its own is a ModuleScript INSTANCE, and Roblox does
+-- not proxy a module's return values onto the instance. Reading
+-- `Shared.Types.RegionDiscovered` therefore yields nil in Studio exactly as it
+-- did in the headless boot test — the connection below silently never happened,
+-- so AI-composed grounds were announced to clients but never built into the
+-- world. The module has to be required first.
+local Types = require(Shared.Types)
+
 local OceanService = require(script.Parent.OceanService)
 local CastService = require(script.Parent.CastService)
 local WorldGen = require(script.Parent.WorldGen)
@@ -66,11 +75,19 @@ function Main.start(): ()
 	end)
 
 	-- 4. New regions arrive over time; each one gets built when it is admitted.
-	--    Note: RemoteEvent has NO `.Event` property — that is a RBXScriptSignal
-	--    on RemoteFunction. Reaching for it threw here and, worse, silently
-	--    ended boot.
+	--
+	--    `remote.Event:Connect` is the correct Roblox idiom. The previous comment
+	--    here claimed RemoteEvent has no `.Event` property and that it was "a
+	--    RBXScriptSignal on RemoteFunction" — that is backwards, and it is why
+	--    this line had drifted into `remote:Connect(...)`, which is not a method
+	--    RemoteEvent has at all. It is RemoteFunction that lacks `.Event` and
+	--    uses `.OnServerEvent`/`.OnClientEvent` instead.
+	--
+	--    Both mistakes were silent: Main wraps every stage in pcall and only
+	--    prints, so the listener simply never existed and AI-composed grounds
+	--    were broadcast to clients but never built into the world.
 	stage("region listener", function()
-		svc.remotes[Shared.Types.RegionDiscovered]:Connect(function()
+		svc.remotes[Types.RegionDiscovered].Event:Connect(function()
 			task.defer(function()
 				WorldGen.build(svc.ocean)
 			end)
@@ -87,10 +104,8 @@ function Main.start(): ()
 			local character = player.Character or player.CharacterAdded:Wait()
 			local rootPart = character and character:FindFirstChild("HumanoidRootPart")
 			if rootPart then
-				rootPart.CFrame = CFrame.new(0, 40, 90) * CFrame.lookAt(
-					Vector3.new(0, 40, 90),
-					Vector3.new(0, 0, 0)
-				)
+				rootPart.CFrame = CFrame.new(0, 40, 90)
+					* CFrame.lookAt(Vector3.new(0, 40, 90), Vector3.new(0, 0, 0))
 			end
 		end)
 	end)
