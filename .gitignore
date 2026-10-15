@@ -27,3 +27,6 @@ Thumbs.db
 
 # Agent scratch files
 pipeline/bathy/.bathy-run.*
+
+# Blender scratch
+art/**/blender-dl/

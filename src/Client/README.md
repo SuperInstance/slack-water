@@ -18,7 +18,8 @@ server stays the sole authority on time.
 | `RegionChart.client.luau` | OceanSync grounds list, sorted richest-first: name, habitat (colour-stable across the UI), charted depth, what is present, and an abundance bar colour-coded against `Config.COLLAPSE_THRESHOLD`. Below-threshold grounds read `PICKED OVER`; any contested species flags `⚔ CONTESTED`; grounds the tide has cut off dim and read `WAIT FOR TIDE`; unsurveyed grounds carry a `~` suffix and the subtitle shows the server's `% of chart surveyed`. |
 | `Notify.client.luau` | Toasts from Notify payloads (kinds: run/scarcity/contest/market/discover, each with its own icon+colour), plus RegionDiscovered mapped to a `discover` toast. Max 4 stacked, auto-dismiss. |
 | `GearBar.client.luau` | The skipper's career sheet: level, xp bar and the gear ladder from ProfileSync (server-computed, sent to this player only). Owned gear rows send a `GearRequest` and re-render whatever the server answers; locked rows show the level requirement. Never computes effort or predicts yield. |
-| `Casting.client.luau` | **Owned by another agent — do not edit here.** It is the fight minigame's state machine and creates no UI, so it neither collides with nor is referenced by these panels. As of 2026-10-14 nothing starts it — see `docs/PLAYLOOP.md` defect 1: the cast loop has no driver. |
+| `Casting.client.luau` | The fight minigame's state machine (UI-free: touch/mouse/keyboard input, tension/progress/stamina, the server round trip). Its boot block starts the machine and publishes `PlayerGui.SlackWaterCastBus`, the BindableEvent the other client scripts drive it through — LocalScripts cannot `require` each other, so that named instance is the whole contract (docs/CASTING.md). A resolve the server never answers times out after 12 s instead of sitting in `"waiting"` forever. |
+| `CastBar.client.luau` | **The way in** — the cast loop's entry point, owning the bottom edge of the screen. A thumb-scale CAST button, a rig sheet (ground / target / depth; closed grounds say when the tide opens them), the fight readout (tension with the safe band, catch, stamina) while the line is out, and honest failure lines for refused casts, lost fights and dead resolves. Its pure half (selection legality, blind targeting, the tide walk, the double-cast guard, cooldown formatting) is unit- and execution-tested by tests/cast-loop-tests.luau; the selection rules only decide what to OFFER — the server arbitrates every outcome. Contract and failure-path table: docs/CASTING.md. |
 
 ## Layout (designed at 390x844, scaled everywhere else)
 
@@ -40,14 +41,21 @@ a full-screen transparent root, and one `UIScale` (`Ui.autoScale`) clamped to
 │      CatchCard (transient, modal)   │  centre at 40% height, tap-dismiss
 │         + xp line, level-up banner  │
 │                                     │
-│  (bottom edge left free for the     │
-│   casting controls, owned elsewhere)│
-└─────────────────────────────────────┘
+│  CastBar rig sheet (when open)      │  y ~250..720, above the bar
+│  ┌───────────────────────────────┐  │
+│  │ status / failure line         │  │
+│  │ [  CAST  ]  ground · rig ▴   │  │  y 732..832 — the bar. During a
+│  └───────────────────────────────┘  │  fight it becomes the readout
+└─────────────────────────────────────┘  (tension/catch/stamina meters)
 ```
 
 Only one sheet can be open at a time. They coordinate through a single
 PlayerGui attribute (`SlackWaterOpenPanel`) set in `Ui.makeSheet` — no
 cross-script references, so either panel file can change independently.
+CastBar's rig sheet joins that channel: opening it clears the attribute
+(closing any right-edge sheet), and a right-edge sheet opening closes the
+rig sheet. It matches the attribute by string because the name is a local
+in `Ui.luau`.
 
 ## Progression on the wire
 
@@ -133,31 +141,59 @@ gates). A CastResult can also carry `xpGained`/`level`/`unlockedGear` to see
 the card's xp line and level-up banner — e.g. add `xpGained = 37` to the
 payload above.
 
+The cast loop itself (never yet run in Studio — these are the checks that
+matter first, in order):
+
+5. The bottom bar appears: `CAST` (left, large) and a rig summary reading
+   `no ground chosen`. Tapping the summary opens RIG THE LINE above the bar;
+   the bar and its CAST button stay visible under it.
+6. Pick a ground: rows show quality (`78% now`) or `WAIT FOR TIDE` with an
+   opening time; the HUD flips to `bound for <ground>`. Pick a target and
+   drag the depth slider (snaps to 5 m).
+7. Press CAST: the bar swaps to the fight readout (species, TENSION with a
+   pale safe band, CATCH, STAMINA). Hold anywhere on the water to reel;
+   release to give line. A second press on CAST mid-fight must do nothing
+   but say `the line is already out`. `✕ reel in` abandons.
+8. On a win: `landed — the shore is weighing it…`, then a CatchCard and the
+   bar's `landed · <value>` line. On a server refusal the bar's status line
+   carries the reason in red. If the fight is lost, the bar is the only
+   surface (`The line parted.` / `You reeled in.`).
+9. Phone check (device emulator, 390x844): CAST reachable one-handed; the
+   rig sheet's rows and slider work by touch; touches on the fight readout
+   still reel (the meters must not sink input — only buttons do).
+
 ## Known gaps
 
-- **The cast loop has no driver** — the single biggest gap in the game.
-  `Casting.client.luau` is a state machine nothing starts: no aim UI, no
-  cast button, no caller of `beginFight`. See `docs/PLAYLOOP.md` for the
-  full trace and the server-side breakages that sit behind it
-  (`Config.CAST_COOLDOWN` missing, `performance` unguarded, the broken
-  RegionDiscovered listener in Main).
+- **The cast loop has never been played.** It has an entry point now
+  (CastBar, tests, and docs/CASTING.md), and tests/cast-loop-tests.luau
+  executes the whole client loop under a fake engine — but nothing has been
+  run in Studio. Layout, hit areas and the fight's feel are unproven. The
+  server-side breakages behind the loop are fixed as of this writing
+  (`Config.CAST_COOLDOWN` exists; `performance` is declared and defaulted in
+  Types.luau by the wallet pass).
+- **The tide gate cannot bite with current constants.** The shallowest
+  species band (pink salmon, 5 m) sits above the worst-case tide (-2.57 m)
+  plus draught (1.8 m), so every ground that can host a legal species is
+  always accessible — "WAIT FOR TIDE" is display-only until the constants or
+  the roster change. See docs/CASTING.md for the arithmetic; the fix belongs
+  in src/Shared, not here.
 - **Buying gear is not wired.** `Progression.buy` exists and validates level +
   funds, but the server has no wallet/money store to deduct from, so GearBar
   only ever *equips* gear the profile already owns. Locked rows honestly show
   "reached at level N · price X" with no buy button. Wiring the buy needs a
   funds owner first (see `src/Server/README.md`).
-- **Default Roblox chrome** (chat top-left, player list top-right) can overlap
-  the HUD cluster until the game disables it with
-  `StarterGui:SetCoreGuiEnabled`; that call belongs to game bootstrap, not to
-  a panel.
+- **Default Roblox chrome** (chat top-left, player list top-right, mobile
+  jump button bottom-right) can overlap the HUD cluster and the CAST bar
+  until the game disables it with `StarterGui:SetCoreGuiEnabled`; that call
+  belongs to game bootstrap, not to a panel.
 - **`contested` arrives empty** from `broadcastOcean` (the map is always
   `{}`), so GROUNDS never shows `⚔ CONTESTED` from syncs — only the CatchCard
   flag can show it today. Again a server gap, not a panel one.
-- **Keep/sell does not exist.** The CatchCard is dismiss-only; there is no
-  sell remote in `Types.luau` and no wallet to pay into. The HUD total is a
-  client-side session sum, display only.
 - **`run` and `market` toasts never fire** — no server code sends those
   Notify kinds (only contest/scarcity from CastService).
+- **A late CastResult after an abandoned resolve still shows its card**
+  (CatchCard listens to the remote directly; Casting's token ignores the
+  stale reply, but the card has no token). Small window, other owner's file.
 - Icons are emoji by choice: zero asset dependencies while the layout is
   being proven (the art language is placeholder project-wide, see the root
   README).
