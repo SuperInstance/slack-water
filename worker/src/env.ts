@@ -13,11 +13,8 @@ export interface Env {
 	DB: D1Database;
 	/** Overrides the composer model without a code change. */
 	AI_MODEL?: string;
+	/** When set, POST /ocean/tick requires header x-admin-token to match. */
+	ADMIN_TOKEN?: string;
 }
 
 export const VERSION = "1.0.0";
-
-export interface Json {
-	ok: boolean;
-	[key: string]: unknown;
-}

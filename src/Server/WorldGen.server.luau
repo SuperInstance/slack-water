@@ -20,7 +20,6 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local OceanSim = require(Shared.Ocean.OceanSim)
-local Types = require(Shared.Types)
 
 local WorldGen = {}
 

@@ -25,6 +25,8 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Rng = require(Shared.Ocean.Rng)
 local OceanSim = require(Shared.Ocean.OceanSim)
 local Regions = require(Shared.Ocean.Regions)
+local Chart = require(Shared.Ocean.Chart)
+local Tide = require(Shared.Tide)
 local Market = require(Shared.Market)
 local Species = require(Shared.Species)
 local Config = require(Shared.Config)
@@ -33,10 +35,12 @@ local Types = require(Shared.Types)
 export type Service = {
 	ocean: any,
 	market: any,
+	chart: any,
 	rng: any,
 	remotes: { [string]: any },
 	seed: number,
 	round: number,
+	hour: number,
 	backendOnline: boolean,
 }
 
@@ -101,18 +105,39 @@ function Service.start(): Service?
 
 	-- Seed the starting ocean procedurally. This is the floor: a fresh server
 	-- always has somewhere to fish, with or without the backend.
-	local initialRegions = Regions.generate(seed, 14)
+	--
+	-- Everything seeded this way is `grown`, not `measured` — the chart is
+	-- honest about being an inference until a real sounding arrives. See
+	-- src/Shared/Ocean/Chart.luau.
+	local chart = Chart.new()
+	local initialRegions = Regions.generate(seed, Config.INITIAL_REGIONS)
 	for _, region in initialRegions do
 		OceanSim.addRegion(ocean, region)
+		Chart.add(chart, {
+			id = region.id,
+			name = region.name,
+			habitat = region.habitat,
+			lat = 0,
+			lon = 0,
+			hasPosition = false,
+			chartedDepth = region.depth,
+			bottomType = "sand",
+			provenance = "grown",
+			confidence = 0.4,
+			surveyedAt = nil,
+			source = "procedural seed",
+		})
 	end
 
 	local svc: Service = {
 		ocean = ocean,
 		market = market,
+		chart = chart,
 		rng = rng,
 		remotes = buildRemotes(),
 		seed = seed,
 		round = 0,
+		hour = 0,
 		backendOnline = false,
 	}
 
@@ -142,13 +167,29 @@ end
 
 local function tickOcean(svc: Service): ()
 	OceanSim.tick(svc.ocean, svc.rng)
+
+	-- Advance the clock. One tick is one in-game hour, so a real tidal cycle
+	-- passes over a couple of minutes of play rather than never.
+	svc.hour += 1.0
+	if svc.hour >= Config.HOURS_PER_DAY then
+		svc.hour -= Config.HOURS_PER_DAY
+		Service.advanceDay(svc)
+	end
+
 	Service.refreshMarket(svc)
 	Service.advanceCalendar(svc)
 end
 
+--- The simulation's own calendar now only tracks days and months for the
+--- salmon runs; the hour of day lives on the service, because the tide needs a
+--- continuous clock while the runs only need to know the month.
+function Service.advanceDay(svc: Service): ()
+	OceanSim.advanceDay(svc.ocean, svc.rng)
+end
+
 --- Every tick rolls a small chance the calendar crosses into a new month, and
 --- a new month is the natural time to ask the backend for new fishing grounds.
-local function advanceCalendar(svc: Service)
+function Service.advanceCalendar(svc: Service)
 	if svc.ocean.day ~= 1 then
 		return
 	end
@@ -204,14 +245,60 @@ end
 --- Apply a catch. This is the only path by which the ocean changes, and it is
 --- always server-authoritative — the client sends intent (region, species,
 --- gear), never an outcome.
+---
+--- The tide is applied here, and this is the mechanic the whole game rests on:
+--- a shoal with less water over it than the boat draws is simply not reachable,
+--- and what can be reached fishes worse in a heavy current than at slack.
 function Service.harvest(svc: Service, regionId: string, speciesId: string, effort: number): any
-	local result = OceanSim.harvest(svc.ocean, regionId, speciesId, effort)
+	local region = OceanSim.getRegion(svc.ocean, regionId)
+	if not region then
+		return nil
+	end
+
+	-- Chart depth, not a generated depth, is what the tide acts on. Falling
+	-- back to the region's depth keeps seeded water playable.
+	local sounding = Chart.get(svc.chart, regionId)
+	local chartedDepth = if sounding then sounding.chartedDepth else region.depth
+
+	local accessible = Tide.accessAt(chartedDepth, svc.hour)
+	if not accessible then
+		return nil
+	end
+
+	-- Slack water is worth real money. At dead slack a cast is worth full
+	-- effort; in a heavy current the same cast pulls far less out of the water.
+	local quality = Tide.fishingQuality(chartedDepth, svc.hour)
+	local scaledEffort = effort * math.clamp(quality, 0.25, 1.0)
+
+	local result = OceanSim.harvest(svc.ocean, regionId, speciesId, scaledEffort)
 	if not result then
 		return nil
 	end
 
+	-- Carry the tide through so callers (and the UI) can explain the catch.
+	result.tideQuality = quality
+	result.tideHour = svc.hour
+
 	Service.refreshMarket(svc)
 	return result
+end
+
+--- The public tide state, for the HUD and for gating UI before a player tries
+--- to sail somewhere they cannot go.
+function Service.tideState(svc: Service): any
+	local events = Tide.nextEvents(svc.hour)
+	return {
+		hour = svc.hour,
+		height = Tide.heightAt(svc.hour),
+		current = Tide.currentAt(svc.hour),
+		isSlack = Tide.isSlack(svc.hour),
+		phase = Tide.phaseName(svc.hour),
+		nextHigh = events.high,
+		nextHighTime = events.highTime,
+		nextLow = events.low,
+		nextLowTime = events.lowTime,
+		hoursToSlack = Tide.hoursToSlack(svc.hour),
+	}
 end
 
 --=============================================================================
@@ -235,14 +322,27 @@ function Service.broadcastOcean(svc: Service): ()
 				end
 			end
 
+			-- Tide access is per region, not global: a 2 m shoal and a 200 m
+			-- channel can be in the same bay and behave completely differently
+			-- right now. The client needs this to grey out grounds the boat
+			-- cannot physically reach.
+			local sounding = Chart.get(svc.chart, regionId)
+			local chartedDepth = if sounding then sounding.chartedDepth else region.depth
+			local accessible, waterDepth = Tide.accessAt(chartedDepth, svc.hour)
+
 			table.insert(regions, {
 				id = region.id,
 				name = region.name,
 				habitat = region.habitat,
 				depth = region.depth,
+				chartedDepth = chartedDepth,
 				abundances = abundances,
 				contested = {},
 				species = present,
+				accessible = accessible,
+				waterDepth = waterDepth,
+				quality = Tide.fishingQuality(chartedDepth, svc.hour),
+				provenance = if sounding then sounding.provenance else "grown",
 			})
 		end
 	end
@@ -251,6 +351,8 @@ function Service.broadcastOcean(svc: Service): ()
 		month = svc.ocean.month,
 		day = svc.ocean.day,
 		tick = svc.ocean.tickCount,
+		tide = Service.tideState(svc),
+		chartCoverage = Chart.coverage(svc.chart),
 		regions = regions,
 	})
 end

@@ -96,10 +96,13 @@ export function extractBankCandidates(payload: unknown): unknown[] {
 function parsePayload(payload: unknown): unknown {
 	if (payload == null) return null;
 
+	// Already a parsed array (a model or proxy that returned raw JSON body).
+	if (Array.isArray(payload)) return payload;
+
 	// Workers AI chat models answer with { response: "..." }; some return an
 	// OpenAI-ish { choices: [...] }; a structured-mode reply may already be
 	// the object itself.
-	if (typeof payload === "object" && !Array.isArray(payload)) {
+	if (typeof payload === "object") {
 		const record = payload as Record<string, unknown>;
 		if (typeof record.response === "string") return parseJsonText(record.response);
 		if (record.response != null && typeof record.response === "object") {
@@ -180,17 +183,17 @@ export function proceduralCandidate(rng: Rng): Record<string, unknown> {
 		habitat === "estuary" ? rng.range(18, 28) : rng.range(30, 34.5);
 
 	const candidates = candidatesAtDepth(depth);
-	const pool = candidates.length > 0 ? candidates : candidatesAtDepth(60);
+	// At an extreme depth (e.g. 5m) only one species may be in band; a mix of
+	// one is valid but uninteresting, so borrow the 60m community instead.
+	const pool = [...(candidates.length >= 2 ? candidates : candidatesAtDepth(60))];
 	const chosenCount = Math.min(pool.length, rng.int(2, Math.min(5, pool.length)));
-	const speciesPool = [...pool];
-	// partial Fisher-Yates over the pool to pick `chosenCount` species
+	// splice-pick without replacement: no species appears twice in a mix
+	const speciesMix: { speciesId: string; weight: number }[] = [];
 	for (let i = 0; i < chosenCount; i++) {
-		const j = i + rng.int(0, speciesPool.length - 1 - i);
-		[speciesPool[i], speciesPool[j]] = [speciesPool[j], speciesPool[i]];
+		const picked = pool.splice(rng.int(0, pool.length - 1), 1)[0];
+		if (picked === undefined) break;
+		speciesMix.push({ speciesId: picked.id, weight: rng.range(0.3, 1.0) });
 	}
-	const speciesMix = speciesPool
-		.slice(0, chosenCount)
-		.map((species) => ({ speciesId: species.id, weight: rng.range(0.3, 1.0) }));
 
 	const hazard =
 		rng.chance(0.5) ? "none" : rng.pick(VALID_HAZARDS.filter((h) => h !== "none"));

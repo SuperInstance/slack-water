@@ -88,14 +88,41 @@ Config.MIN_YIELD_FACTOR = 0.25
 Config.CONTEST_THRESHOLD = 0.05
 
 --=============================================================================
--- Banking (the AI-authored content surface)
+-- Tide
+--
+-- The tide is the clock: it gates which grounds are reachable, how well they
+-- fish, and gives the day a shape. See src/Shared/Tide.luau — including the
+-- note there about the harmonic constants being ESTIMATED rather than measured.
 --=============================================================================
 
--- Number of candidate banks the composer proposes per settlement round.
-Config.BANKS_PER_ROUND = 4
+-- Metres of water a working boat needs over a ground before it can fish it.
+-- At low water a 2 m shoal is dry rock; at high water it is fishable.
+Config.TIDE_MIN_DRAUGHT = 1.8
 
--- Hard ceiling on how far a bank may drift from sane parameters. A bank that
--- fails validation is discarded and regenerated procedurally instead.
-Config.MAX_BANKS = 4096
+-- How much extra depth beyond the minimum counts as "comfortably fished".
+-- Beyond this the bonus saturates — being over a shoal in ten fathoms of water
+-- is not better fishing, it is just deep water.
+Config.TIDE_DEPTH_MARGIN = 2.5
+
+-- Tide-curve slope treated as "full current" for normalisation purposes. This
+-- is a divisor, so it calibrates the current scale against the estimated
+-- harmonic amplitudes. If those amplitudes are replaced with real ones, this
+-- must be recalibrated against them.
+Config.TIDE_CURRENT_SLOPE_REF = 0.45
+
+-- Current strength at or below which the water counts as slack. The game is
+-- named for this interval.
+Config.TIDE_SLACK_THRESHOLD = 0.25
+
+-- Game hours between in-game days. The tide runs in real time inside a day;
+-- this only controls how fast days pass relative to real seconds.
+Config.HOURS_PER_DAY = 24
+
+--=============================================================================
+-- Regions
+--=============================================================================
+
+Config.INITIAL_REGIONS = 14
+Config.BANKS_PER_ROUND = 2
 
 return Config

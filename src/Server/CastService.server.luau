@@ -18,8 +18,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Types = require(Shared.Types)
 local Species = require(Shared.Species)
-local Config = require(Shared.Config)
 local OceanSim = require(Shared.Ocean.OceanSim)
+local Config = require(Shared.Config)
 local OceanService = require(script.Parent.OceanService)
 
 local CastService = {}
@@ -27,6 +27,24 @@ local CastService = {}
 --- Gear is server-authoritative. A client may ask for better gear, but the
 --- effective effort is clamped to what that gear actually provides.
 local DEFAULT_GEAR = Types.Gear.handline
+
+--- Per-player rate limiting.
+---
+--- This is not an anti-cheat measure, it is a conservation measure. The ocean
+--- is shared, so a client that could cast in a tight loop would drain a
+--- fishery that everyone else is fishing. The limit is deliberately generous —
+--- a cast involves a real minigame, so nobody can reach it by playing normally.
+local lastCastAt: { [any]: number } = {}
+
+local function isRateLimited(player: any): boolean
+	local now = os.clock()
+	local last = lastCastAt[player] or 0
+	if now - last < Config.CAST_COOLDOWN then
+		return true
+	end
+	lastCastAt[player] = now
+	return false
+end
 
 local function gearEffortFor(player: any, requestedGearId: string?): any
 	if type(requestedGearId) ~= "string" then
@@ -76,6 +94,10 @@ function CastService.start(): ()
 
 		local regionId = payload.regionId
 		local speciesId = payload.speciesId
+
+		if isRateLimited(player) then
+			return
+		end
 
 		-- Structural validation first. Anything malformed gets a tidy failure
 		-- rather than a thrown error inside a RemoteEvent handler, which would
@@ -146,15 +168,29 @@ function CastService.start(): ()
 		-- Clamp the client's effort claim to the gear it says it holds. Effort
 		-- is the only client-influenced input to the simulation, so this is the
 		-- line between a player rolling well and a player cheating.
+		--
+		-- A non-positive or missing claim falls back to the gear's own rating
+		-- rather than being taken as a literal zero. The client deliberately
+		-- sends effort = 0 — it has no idea what a good cast is worth — so
+		-- trusting that number would mean nothing is ever caught.
 		local gear = gearEffortFor(player, payload.gearId)
-		local effort = math.clamp(tonumber(payload.effort) or gear.effort, 0, gear.effort)
+		local claimed = tonumber(payload.effort) or 0
+		local effort = if claimed > 0 then math.clamp(claimed, 0, gear.effort) else gear.effort
 
 		local result = OceanService.harvest(svc, regionId, speciesId, effort)
 
-		if not result or result.yielded <= 0.0 then
+		if not result then
+			-- No result from the service means the tide has this ground under
+			-- water — or dry. That is not "nothing here", it is "not now", and
+			-- the player deserves to know when to come back. Telling them the
+			-- time of the next high water turns a dead end into an appointment.
+			local tide = OceanService.tideState(svc)
+			local nextHighIn = math.max(0, math.floor(tide.nextHighTime - tide.hour))
 			remotes[Types.CastResult]:FireClient(player, {
 				ok = false,
-				reason = "nothing here",
+				reason = ("The tide has this ground under you. High water in about %dh."):format(
+					nextHighIn
+				),
 				speciesId = speciesId,
 				regionId = regionId,
 				yielded = 0,
@@ -167,6 +203,7 @@ function CastService.start(): ()
 				value = 0,
 				rare = false,
 				inRun = false,
+				tideQuality = 0,
 			})
 			return
 		end
@@ -192,6 +229,7 @@ function CastService.start(): ()
 			value = value,
 			rare = rollRare(species, result.abundanceBefore, performance, rng),
 			inRun = inRun,
+			tideQuality = result.tideQuality or 0,
 		})
 
 		-- Tell everyone at the ground that it is being worked, so other crews
@@ -216,8 +254,8 @@ function CastService.start(): ()
 		end
 	end)
 
-	Players.PlayerAdded:Connect(function(player: any)
-		player.CharacterAdded:Connect(function() end)
+	Players.PlayerRemoving:Connect(function(player: any)
+		lastCastAt[player] = nil
 	end)
 
 	print("[slack-water] cast service listening")

@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 export PATH="$HOME/.local/bin:$PATH"
 
 status=0
-for suite in tests/run-tests.luau tests/economy-tests.luau; do
+for suite in tests/run-tests.luau tests/economy-tests.luau tests/tide-chart-tests.luau; do
   echo ""
   echo "########## $suite ##########"
   if luau "$suite"; then

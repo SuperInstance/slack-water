@@ -99,6 +99,90 @@ drifting.
 
 ---
 
+## The tide is the clock
+
+Borrowed directly from the engine principle in
+[SuperInstance/shoalwater](https://github.com/SuperInstance/shoalwater):
+
+> The tide is the clock. A cove that is a harbor at high water is a mudflat
+> with a winding channel at low water, and a boat can only leave when the tide
+> says so. No invented puzzles: seamanship is the game mechanic.
+
+That solved a problem this game had. Fishing on demand has no rhythm — you fish
+whenever you log in, the ocean is a static resource, and there is never a reason
+to be anywhere at a particular time. The tide supplies all three:
+
+- **Gating.** A shoal charted at 2.0 m is dry rock at low water and fishable at
+  high water. Chart depth plus current tide height is the water actually over
+  the ground, and if that is less than the boat's draught you simply cannot go.
+- **Quality.** Current is strongest mid-tide and slack at the extremes. A cast
+  at dead slack pulls full effort; the same cast in a heavy current pulls a
+  quarter of it.
+- **Rhythm.** Slack water lands at a different hour every day, so there is a
+  reason to look at the clock.
+
+It is also the game's name. `Tide.luau` sums real harmonic constituents (M2, S2,
+N2, K1, O1) rather than shaping a sine, which produces Southeast Alaska's real
+*mixed semidiurnal* pattern — unequal successive heights, and slack water that
+drifts around. Players learn "slack is about four, but sometimes five" without
+being told.
+
+> **Those amplitudes are estimated, not measured.** They are plausible for an
+> exposed Alaskan sound and they get the *shape* right. The authoritative source
+> is NOAA station **9451600**. Careful: the widely-copied pack "9452210 Sitka"
+> is actually **Juneau** — that error is documented in shoalwater and is
+> precisely why this project verifies rather than copies. Drop real constants
+> into `Tide.CONSTITUENTS` and nothing else needs to change.
+
+## The chart, and what it is honest about
+
+`src/Shared/Ocean/Chart.luau` holds bathymetry **with provenance**, taking three
+ideas from shoalwater:
+
+| provenance | meaning | trust |
+| --- | --- | --- |
+| `measured` | a real sounding, verified | high |
+| `grown` | generated from statistics, plausible only | low |
+| `composed` | proposed by the language model, validated | model |
+
+Only `measured` water is ever presented to players as fact. Everything else is
+labelled, and `chartCoverage` is sent to the client so a player can see how much
+of the map is really known — and has a reason to go survey the rest.
+
+The chart format is a flat, stable schema so real soundings drop in by script
+rather than by hand. CSB (crowdsourced boat soundings) and NOAA exports both
+convert. Until then the ocean seeds procedurally and every region is honestly
+marked `grown`.
+
+**Ground truth is a practice, not a dataset.** `Chart.survey` is the gesture: an
+existing region upgrades from grown to measured and the coverage metric moves.
+Survey days are play days.
+
+## Keeping the two implementations honest
+
+There are two implementations of the same economy: the Luau simulation that
+runs in Roblox, and the TypeScript worker that owns the shared state in D1. They
+must agree exactly, or every server tells its players a different price for the
+same fish.
+
+They did not. The worker shipped a scarcity curve (`1 / abundance`) matching
+neither version of the Luau one, and **its own test suite passed** — because it
+only ever tested itself. A green suite proved nothing.
+
+The fix is structural, not a code review:
+
+```
+tests/generate-vectors.luau  ->  shared/economy-vectors.json
+                                          |
+              both sides read it and assert the same numbers
+```
+
+The Luau side is authoritative and generates the fixture; the worker asserts
+against it. `worker/tests/parity.test.ts` now covers scarcity, target prices,
+market inertia path, effective capacity and harvest yield. Changing an economy
+constant on one side without the other now fails a test instead of quietly
+desyncing the game.
+
 ## Architecture
 
 ```

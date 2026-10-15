@@ -8,7 +8,6 @@
 	entire reason the ocean is shared evaporates.
 ]]
 
-local Rng = require("./../src/Shared/Ocean/Rng")
 local BankSpec = require("./../src/Shared/Ocean/BankSpec")
 local Regions = require("./../src/Shared/Ocean/Regions")
 local Market = require("./../src/Shared/Market")

@@ -10,9 +10,6 @@
 	and nobody would notice from playing for five minutes.
 ]]
 
-local ROOT = (nil :: any)
-local scriptDir = (nil :: any)
-
 local Rng = require("./../src/Shared/Ocean/Rng")
 local OceanSim = require("./../src/Shared/Ocean/OceanSim")
 local Species = require("./../src/Shared/Species")

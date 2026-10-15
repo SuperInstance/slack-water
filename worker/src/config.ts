@@ -23,6 +23,10 @@ export const CONFIG = {
 
 	// Market
 	MAX_SCARCITY_MULTIPLIER: 6.0,
+	// Denominator floor of the scarcity curve. Must match SCARCITY_FLOOR in
+	// Config.luau — at 0.15 the curve's asymptote (1/0.15 = 6.67) sits just
+	// above MAX_SCARCITY_MULTIPLIER so the cap is actually reachable.
+	SCARCITY_FLOOR: 0.15,
 	PRICE_INERTIA: 0.82,
 	PRICE_FLOOR_MOVE: 0.015,
 
@@ -31,8 +35,15 @@ export const CONFIG = {
 	MIN_YIELD_FACTOR: 0.25,
 	CONTEST_THRESHOLD: 0.05,
 
+	// Tide (display only — the worker does not gate access, but it does publish
+	// the clock so every server shows the same tide)
+	HOURS_PER_DAY: 24,
+
+	// Regions
+	INITIAL_REGIONS: 14,
+
 	// Banking
-	BANKS_PER_ROUND: 4,
+	BANKS_PER_ROUND: 2,
 	MAX_BANKS: 4096,
 } as const;
 

@@ -20,7 +20,6 @@
 
 local scriptParent = script and script.Parent
 local Rng = require(scriptParent and scriptParent.Rng or "./Rng")
-local Config = require(scriptParent and scriptParent.Parent.Config or "../Config")
 local Species = require(scriptParent and scriptParent.Parent.Species or "../Species")
 
 type Habitat = "kelp" | "reef" | "sand" | "mud" | "open" | "estuary"

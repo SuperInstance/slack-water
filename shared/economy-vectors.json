@@ -1,0 +1,392 @@
+{
+  "capacity": [
+    {
+      "capacity": 1485,
+      "depth": 60,
+      "habitat": "reef",
+      "richness": 1,
+      "speciesId": "rockfish"
+    },
+    {
+      "capacity": 1300,
+      "depth": 60,
+      "habitat": "reef",
+      "richness": 1,
+      "speciesId": "herring"
+    },
+    {
+      "capacity": 22.05,
+      "depth": 60,
+      "habitat": "reef",
+      "richness": 1,
+      "speciesId": "halibut"
+    },
+    {
+      "capacity": 405,
+      "depth": 60,
+      "habitat": "reef",
+      "richness": 1,
+      "speciesId": "yelloweye"
+    },
+    {
+      "capacity": 9.75,
+      "depth": 60,
+      "habitat": "reef",
+      "richness": 1,
+      "speciesId": "kingcrab"
+    },
+    {
+      "capacity": 270,
+      "depth": 60,
+      "habitat": "reef",
+      "richness": 1,
+      "speciesId": "chinook"
+    }
+  ],
+  "config": {
+    "COLLAPSE_THRESHOLD": 0.25,
+    "MAX_HARVEST_FRACTION": 0.12,
+    "MAX_SCARCITY_MULTIPLIER": 6,
+    "MIN_YIELD_FACTOR": 0.25,
+    "PRICE_INERTIA": 0.82,
+    "SCARCITY_FLOOR": 0.15
+  },
+  "generatedBy": "tests/generate-vectors.luau",
+  "harvest": [
+    {
+      "abundanceAfter": 0.82,
+      "abundanceBefore": 0.82,
+      "capacity": 1485,
+      "depleted": false,
+      "effort": 0,
+      "speciesId": "rockfish",
+      "yielded": 0
+    },
+    {
+      "abundanceAfter": 0.817088,
+      "abundanceBefore": 0.82,
+      "capacity": 1485,
+      "depleted": false,
+      "effort": 5,
+      "speciesId": "rockfish",
+      "yielded": 4.325
+    },
+    {
+      "abundanceAfter": 0.805438,
+      "abundanceBefore": 0.82,
+      "capacity": 1485,
+      "depleted": false,
+      "effort": 25,
+      "speciesId": "rockfish",
+      "yielded": 21.625
+    },
+    {
+      "abundanceAfter": 0.761751,
+      "abundanceBefore": 0.82,
+      "capacity": 1485,
+      "depleted": false,
+      "effort": 100,
+      "speciesId": "rockfish",
+      "yielded": 86.5
+    },
+    {
+      "abundanceAfter": 0.7162,
+      "abundanceBefore": 0.82,
+      "capacity": 1485,
+      "depleted": false,
+      "effort": 100000,
+      "speciesId": "rockfish",
+      "yielded": 154.143
+    }
+  ],
+  "inertia": [
+    {
+      "abundance": 0.2,
+      "direction": "rising",
+      "price": 635.95,
+      "step": 1
+    },
+    {
+      "abundance": 0.2,
+      "direction": "rising",
+      "price": 780.229,
+      "step": 2
+    },
+    {
+      "abundance": 0.2,
+      "direction": "rising",
+      "price": 898.5378,
+      "step": 3
+    },
+    {
+      "abundance": 0.2,
+      "direction": "rising",
+      "price": 995.551,
+      "step": 4
+    },
+    {
+      "abundance": 0.2,
+      "direction": "rising",
+      "price": 1075.1018,
+      "step": 5
+    },
+    {
+      "abundance": 0.2,
+      "direction": "rising",
+      "price": 1140.3335,
+      "step": 6
+    },
+    {
+      "abundance": 0.2,
+      "direction": "rising",
+      "price": 1193.8235,
+      "step": 7
+    },
+    {
+      "abundance": 0.2,
+      "direction": "rising",
+      "price": 1237.6852,
+      "step": 8
+    },
+    {
+      "settledAbundance": 0.2,
+      "settledFrom": 460,
+      "settledPrice": 1237.6852
+    }
+  ],
+  "note": "Luau is authoritative. The worker TypeScript must reproduce these exactly.",
+  "prices": [
+    {
+      "abundance": 0.1,
+      "speciesId": "herring",
+      "targetPrice": 127.6596
+    },
+    {
+      "abundance": 0.35,
+      "speciesId": "herring",
+      "targetPrice": 67.0391
+    },
+    {
+      "abundance": 0.6,
+      "speciesId": "herring",
+      "targetPrice": 45.4545
+    },
+    {
+      "abundance": 1,
+      "speciesId": "herring",
+      "targetPrice": 30
+    },
+    {
+      "abundance": 0.1,
+      "speciesId": "cod",
+      "targetPrice": 553.1915
+    },
+    {
+      "abundance": 0.35,
+      "speciesId": "cod",
+      "targetPrice": 290.5028
+    },
+    {
+      "abundance": 0.6,
+      "speciesId": "cod",
+      "targetPrice": 196.9697
+    },
+    {
+      "abundance": 1,
+      "speciesId": "cod",
+      "targetPrice": 130
+    },
+    {
+      "abundance": 0.1,
+      "speciesId": "rockfish",
+      "targetPrice": 617.0213
+    },
+    {
+      "abundance": 0.35,
+      "speciesId": "rockfish",
+      "targetPrice": 324.0223
+    },
+    {
+      "abundance": 0.6,
+      "speciesId": "rockfish",
+      "targetPrice": 219.697
+    },
+    {
+      "abundance": 1,
+      "speciesId": "rockfish",
+      "targetPrice": 145
+    },
+    {
+      "abundance": 0.1,
+      "speciesId": "halibut",
+      "targetPrice": 1957.4468
+    },
+    {
+      "abundance": 0.35,
+      "speciesId": "halibut",
+      "targetPrice": 1027.933
+    },
+    {
+      "abundance": 0.6,
+      "speciesId": "halibut",
+      "targetPrice": 696.9697
+    },
+    {
+      "abundance": 1,
+      "speciesId": "halibut",
+      "targetPrice": 460
+    },
+    {
+      "abundance": 0.1,
+      "speciesId": "kingcrab",
+      "targetPrice": 2468.0851
+    },
+    {
+      "abundance": 0.35,
+      "speciesId": "kingcrab",
+      "targetPrice": 1296.0894
+    },
+    {
+      "abundance": 0.6,
+      "speciesId": "kingcrab",
+      "targetPrice": 878.7879
+    },
+    {
+      "abundance": 1,
+      "speciesId": "kingcrab",
+      "targetPrice": 580
+    },
+    {
+      "abundance": 0.1,
+      "speciesId": "yelloweye",
+      "targetPrice": 1680.8511
+    },
+    {
+      "abundance": 0.35,
+      "speciesId": "yelloweye",
+      "targetPrice": 882.6816
+    },
+    {
+      "abundance": 0.6,
+      "speciesId": "yelloweye",
+      "targetPrice": 598.4848
+    },
+    {
+      "abundance": 1,
+      "speciesId": "yelloweye",
+      "targetPrice": 395
+    }
+  ],
+  "regions": [
+    {
+      "depth": 138,
+      "habitat": "reef",
+      "id": "r1",
+      "index": 1,
+      "name": "Lower Reef",
+      "richness": 1.132665
+    },
+    {
+      "depth": 194,
+      "habitat": "sand",
+      "id": "r2",
+      "index": 2,
+      "name": "Outer Flats",
+      "richness": 1.015796
+    },
+    {
+      "depth": 180,
+      "habitat": "mud",
+      "id": "r3",
+      "index": 3,
+      "name": "North Basin",
+      "richness": 0.898926
+    },
+    {
+      "depth": 41,
+      "habitat": "open",
+      "id": "r4",
+      "index": 4,
+      "name": "Upper Swells",
+      "richness": 0.782056
+    },
+    {
+      "depth": 50,
+      "habitat": "estuary",
+      "id": "r5",
+      "index": 5,
+      "name": "Inner Estuary",
+      "richness": 1.365186
+    },
+    {
+      "depth": 78,
+      "habitat": "kelp",
+      "id": "r6",
+      "index": 6,
+      "name": "South Kelp Line",
+      "richness": 1.248316
+    },
+    {
+      "depth": 153,
+      "habitat": "reef",
+      "id": "r7",
+      "index": 7,
+      "name": "Cold Coral Head",
+      "richness": 1.131446
+    },
+    {
+      "depth": 39,
+      "habitat": "sand",
+      "id": "r8",
+      "index": 8,
+      "name": "Sheltered Trough",
+      "richness": 1.014576
+    }
+  ],
+  "scarcity": [
+    {
+      "abundance": 0,
+      "multiplier": 6
+    },
+    {
+      "abundance": 0.05,
+      "multiplier": 5.194805
+    },
+    {
+      "abundance": 0.1,
+      "multiplier": 4.255319
+    },
+    {
+      "abundance": 0.2,
+      "multiplier": 3.125
+    },
+    {
+      "abundance": 0.25,
+      "multiplier": 2.758621
+    },
+    {
+      "abundance": 0.33,
+      "multiplier": 2.32288
+    },
+    {
+      "abundance": 0.5,
+      "multiplier": 1.73913
+    },
+    {
+      "abundance": 0.66,
+      "multiplier": 1.40647
+    },
+    {
+      "abundance": 0.75,
+      "multiplier": 1.269841
+    },
+    {
+      "abundance": 0.9,
+      "multiplier": 1.092896
+    },
+    {
+      "abundance": 1,
+      "multiplier": 1
+    }
+  ]
+}

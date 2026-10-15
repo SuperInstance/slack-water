@@ -1,25 +1,43 @@
 /**
- * Market pricing. Prices key off GLOBAL abundance (Σbiomass / Σcapacity
- * across every region) — that is what makes the ocean one shared economy
- * rather than per-server shops.
+ * Market pricing — an exact port of src/Shared/Market.luau.
  *
- * There is no Market.luau to port; these functions implement the behaviour
- * the Config.luau market constants describe: an inverse-abundance scarcity
- * multiplier capped at MAX_SCARCITY_MULTIPLIER, inertia so the market doesn't
- * ping-pong on small catches, and a minimum move so small volume still nudges
- * the price.
+ * Prices key off GLOBAL abundance (Σbiomass / Σcapacity across every region).
+ * That is what makes the ocean one shared economy rather than a per-server shop.
+ *
+ * THIS FILE IS NOT A LOOSE REIMPLEMENTATION. D1 is the truth players actually
+ * harvest against, so every number here must match the Luau simulation exactly
+ * or servers will disagree about what a fish is worth. `tests/parity.test.ts`
+ * enforces that against `shared/economy-vectors.json`, which is generated from
+ * the Luau side.
+ *
+ * A previous version of this file used `1 / abundance` and a minimum-move rule
+ * that exist in neither version of the Luau implementation. Its own tests
+ * passed. That is exactly the failure this port-and-verify setup prevents.
  */
 
 import { CONFIG } from "./config";
 
 /**
- * Scarcity multiplier: 1/abundance, clamped to [1, MAX]. At full abundance
- * fish are worth base value; at 1/6th abundance the cap bites, so a collapsed
- * species becomes valuable but never an instant money printer.
+ * Scarcity multiplier.
+ *
+ * 1 / (SCARCITY_FLOOR + (1 − SCARCITY_FLOOR) · abundance), clamped to
+ * [1, MAX_SCARCITY_MULTIPLIER].
+ *
+ * At full abundance this is exactly 1 — fish are worth base value. As abundance
+ * falls it rises, reaching the cap somewhere below 0.05. The floor in the
+ * denominator is what bounds the curve: without it the multiplier would diverge
+ * at zero abundance and a wiped stock would become an infinite money printer.
  */
 export function scarcityMultiplier(abundance: number): number {
-	if (abundance <= 0) return CONFIG.MAX_SCARCITY_MULTIPLIER;
-	return clamp(1 / abundance, 1.0, CONFIG.MAX_SCARCITY_MULTIPLIER);
+	const a = clamp(abundance, 0.0, 1.0);
+	const floor = CONFIG.SCARCITY_FLOOR;
+	const multiplier = 1.0 / (floor + (1.0 - floor) * a);
+	return clamp(multiplier, 1.0, CONFIG.MAX_SCARCITY_MULTIPLIER);
+}
+
+/** The price a species would trade at right now, with no inertia applied. */
+export function targetPrice(baseValue: number, abundance: number): number {
+	return baseValue * scarcityMultiplier(abundance);
 }
 
 export type PriceDirection = "rising" | "falling" | "flat";
@@ -30,38 +48,41 @@ export interface SteppedPrice {
 }
 
 /**
- * Move `prevPrice` one inertia step toward baseValue·multiplier.
+ * Move `prevPrice` one inertia step toward baseValue · multiplier.
  *
- * The step is (1 − INERTIA) of the gap, but never smaller than
- * PRICE_FLOOR_MOVE·prevPrice while a gap exists, and never large enough to
- * overshoot the target (which would make the price oscillate around it).
+ * A straight `(1 − INERTIA)` fraction of the gap. There is deliberately NO
+ * minimum-move rule here: the Luau side does not have one, and adding one is
+ * what made the two implementations disagree. Direction is then read off the
+ * result using a relative threshold OR an absolute one, so a low-priced species
+ * that moved meaningfully does not read as flat.
  */
-export function stepPrice(
-	prevPrice: number,
-	baseValue: number,
-	multiplier: number,
-): SteppedPrice {
+export function stepPrice(prevPrice: number, baseValue: number, multiplier: number): SteppedPrice {
 	const target = baseValue * multiplier;
-	if (prevPrice <= 0) {
-		// First pricing of a freshly seeded species: jump straight to target.
+
+	if (!(prevPrice > 0)) {
+		// A species the market has never priced lands straight on target.
 		return { price: target, direction: "flat" };
 	}
 
-	const delta = target - prevPrice;
-	if (delta === 0) return { price: prevPrice, direction: "flat" };
+	const next = prevPrice + (target - prevPrice) * (1.0 - CONFIG.PRICE_INERTIA);
+	const price = Math.max(next, 1.0);
 
-	const inertiaMove = delta * (1 - CONFIG.PRICE_INERTIA);
-	const minMove = prevPrice * CONFIG.PRICE_FLOOR_MOVE;
-	const move =
-		delta > 0
-			? Math.min(Math.max(inertiaMove, minMove), delta)
-			: Math.max(Math.min(inertiaMove, -minMove), delta);
+	const relativeMove = (price - prevPrice) / prevPrice;
+	const absoluteMove = price - prevPrice;
 
-	const price = prevPrice + move;
-	return {
-		price,
-		direction: move > 0 ? "rising" : move < 0 ? "falling" : "flat",
-	};
+	let direction: PriceDirection = "flat";
+	if (relativeMove > CONFIG.PRICE_FLOOR_MOVE || absoluteMove > 0.5) {
+		direction = "rising";
+	} else if (relativeMove < -CONFIG.PRICE_FLOOR_MOVE || absoluteMove < -0.5) {
+		direction = "falling";
+	}
+
+	return { price, direction };
+}
+
+/** True when a stock is scarce enough to tell players to go find it elsewhere. */
+export function isScarce(globalAbundance: number): boolean {
+	return globalAbundance < CONFIG.COLLAPSE_THRESHOLD * 1.4;
 }
 
 function clamp(value: number, min: number, max: number): number {

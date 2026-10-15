@@ -65,6 +65,24 @@ export type CastResultPayload = {
 	rare: boolean,
 	-- a salmon run is active on this species at this region right now
 	inRun: boolean,
+	-- 0..1, how good the tide was for this catch (1 at dead slack). Lets the
+	-- UI connect cause and effect: "you fought it at slack water" is a much
+	-- better moment than a bare number.
+	tideQuality: number,
+}
+
+--- server -> client, on every OceanSync
+export type TideState = {
+	hour: number,
+	height: number,
+	current: number,
+	isSlack: boolean,
+	phase: string,
+	nextHigh: number,
+	nextHighTime: number,
+	nextLow: number,
+	nextLowTime: number,
+	hoursToSlack: number,
 }
 
 --- server -> client, periodic
@@ -72,15 +90,32 @@ export type OceanSyncPayload = {
 	month: number,
 	day: number,
 	tick: number,
+
+	-- the clock. Every screen that shows "where can I go right now" reads this.
+	tide: TideState,
+
+	-- fraction of the chart backed by real soundings (0..1). Surfacing this is
+	-- deliberate: a player who can see the chart is 60% surveyed has a real
+	-- reason to want to go survey the rest.
+	chartCoverage: number,
+
 	regions: {
 		{
 			id: string,
 			name: string,
 			habitat: string,
 			depth: number,
+			-- depth as charted at MLLW, which is what the tide is measured against
+			chartedDepth: number,
 			abundances: { [string]: number }, -- speciesId -> 0..1+
 			contested: { [string]: boolean },
 			species: { string }, -- what is actually present to fish here
+			-- false when there is not enough water over the ground right now
+			accessible: boolean,
+			waterDepth: number,
+			quality: number, -- 0..1, how good the tide makes this ground
+			-- "measured" | "grown" | "composed" — how much this ground is trusted
+			provenance: string,
 		}
 	},
 }
