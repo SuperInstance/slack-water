@@ -216,6 +216,40 @@ Only `OceanService` mutates ocean state. If cast handling could write to stocks
 directly, the scarcity maths would drift from reality within minutes. That rule
 is what makes the economy trustworthy.
 
+### How the ocean is actually shared
+
+The Worker is authoritative. Each Roblox server holds a *mirror* and answers
+casts instantly against it, because a fishing game cannot pay a network round
+trip on its core loop.
+
+That optimistic path is only safe if divergence is bounded and self-healing:
+
+```
+cast ──> applied locally, queued as an unconfirmed delta
+      └─> reported to the Worker
+            ├─ confirmed  -> delta leaves the queue, next snapshot carries it
+            └─ no answer  -> delta is REPLAYED on top of every snapshot
+```
+
+The replay is the load-bearing step. Without it, a snapshot generated before the
+player landed their fish would silently undo it, and a fisher would watch a catch
+vanish from their ledger. `src/Shared/Ocean/Reconcile.luau` holds that logic as
+pure Luau with 22 tests, because it is the kind of bug that looks like nothing
+happened.
+
+The worst case of a stale mirror is that a player gets slightly less than their
+cast was worth because the ground was picked over on another server. That is the
+game working.
+
+The snapshot also carries the authoritative month and day, which settles a real
+disagreement: the Roblox tick ran every 20s and the Worker cron every 60s, so
+the two implementations disagreed about what a day was — which would have
+quietly desynced the salmon runs.
+
+`OceanSync` carries `shared` and `sharedStatus` so a client can tell whether it
+is looking at the shared ocean or a private one. "The ocean is shared" should be
+a visible claim, not a marketing line that is quietly false on an empty server.
+
 ### Server authority
 
 A client sends intent — region, species, gear, performance. It never sends an
@@ -268,7 +302,7 @@ The server seeds a 14-region ocean and prints:
 ### Tests
 
 ```bash
-./tests/run.sh          # 74 tests, no Studio required
+./tests/run.sh          # 160 tests, no Studio required
 ```
 
 Two suites:
@@ -277,6 +311,11 @@ Two suites:
   dynamics, harvest and scarcity, global supply, snapshots
 - `tests/economy-tests.luau` — AI validation and repair, the scarcity curve,
   market response, region generation
+- `tests/tide-chart-tests.luau` — tide shape, shallow-water gating, chart
+  provenance and real-sounding loading
+- `tests/progression-tests.luau` — XP, gear gating, and the rule that fishing a
+  fresh ground out-earns a picked-over one
+- `tests/reconcile-tests.luau` — snapshot merge, delta replay, backend health
 
 Several of these tests exist because they caught real design bugs. The
 harvest cap originally measured against current stock rather than capacity,
@@ -333,10 +372,12 @@ tension.
 
 ## Known gaps
 
-- The ocean is locally simulated per server until the Worker is wired up. Until
-  then the scarcity economy is per-server, not global.
-- No persistence layer yet — the simulation state is not saved across server
-  restarts.
+- The Worker is wired for composition and for catch reconciliation, but it has
+  never been deployed: `wrangler.toml` still has placeholder binding ids. Until
+  someone runs `wrangler d1 create` and `wrangler deploy`, every server runs its
+  own ocean and `sharedStatus` will honestly say `"local"`.
+- No persistence layer yet — local simulation state is not saved across server
+  restarts. The D1 copy is durable; the mirror is not.
 - Art is placeholder geometry. The world is built from discs and labels; the
   visual language is meant to be replaced once the layout is proven.
 - Balance is tuned against tests, not players. The numbers in `Config.luau` are

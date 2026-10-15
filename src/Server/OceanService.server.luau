@@ -27,6 +27,7 @@ local OceanSim = require(Shared.Ocean.OceanSim)
 local Regions = require(Shared.Ocean.Regions)
 local Chart = require(Shared.Ocean.Chart)
 local Tide = require(Shared.Tide)
+local Reconcile = require(Shared.Ocean.Reconcile)
 local Market = require(Shared.Market)
 local Species = require(Shared.Species)
 local Config = require(Shared.Config)
@@ -42,6 +43,8 @@ export type Service = {
 	round: number,
 	hour: number,
 	backendOnline: boolean,
+	everSynced: boolean,
+	reconciler: any,
 }
 
 local Service = {}
@@ -139,6 +142,8 @@ function Service.start(): Service?
 		round = 0,
 		hour = 0,
 		backendOnline = false,
+		everSynced = false,
+		reconciler = Reconcile.new(),
 	}
 
 	-- Refresh prices from the starting ocean so day one is coherent.
@@ -219,6 +224,15 @@ function Service.beginLoops(svc: Service): ()
 			task.wait(SYNC_INTERVAL)
 		end
 	end)
+
+	-- Pull the global ocean. Until this lands, every Roblox server is fishing
+	-- its own water; once it runs, they share one.
+	task.spawn(function()
+		while svc do
+			Service.pullGlobal(svc)
+			task.wait(SYNC_INTERVAL)
+		end
+	end)
 end
 
 --=============================================================================
@@ -279,8 +293,70 @@ function Service.harvest(svc: Service, regionId: string, speciesId: string, effo
 	result.tideQuality = quality
 	result.tideHour = svc.hour
 
+	-- Queue the catch as unconfirmed, then tell the Worker about it. If the
+	-- Worker confirms, the delta leaves the queue and the next snapshot will
+	-- carry it. If not, the delta is replayed on top of every snapshot, so the
+	-- catch the player just landed is never silently undone.
+	Reconcile.queue(svc.reconciler, regionId, speciesId, result.yielded)
+	Service.reportCatch(svc, regionId, speciesId, result.yielded)
+
 	Service.refreshMarket(svc)
 	return result
+end
+
+--- Tell the Worker about a catch, off the hot path.
+function Service.reportCatch(svc: Service, regionId: string, speciesId: string, biomass: number): ()
+	task.spawn(function()
+		local ok, OceanClient = pcall(function()
+			return require(Shared.Net.OceanClient)
+		end)
+		if not ok then
+			return
+		end
+
+		-- The Worker recomputes the harvest itself against the global stock; we
+		-- send effort, not outcome, exactly as we would from a player.
+		local accepted = OceanClient.reportCatch(regionId, speciesId, biomass)
+		if accepted > 0 then
+			Reconcile.confirm(svc.reconciler, accepted)
+		end
+	end)
+end
+
+--- Pull the authoritative global ocean and merge it in.
+function Service.pullGlobal(svc: Service): boolean
+	local ok, OceanClient = pcall(function()
+		return require(Shared.Net.OceanClient)
+	end)
+	if not ok then
+		return false
+	end
+
+	local snapshot = OceanClient.getSnapshot()
+	if not snapshot.ok or not snapshot.regions then
+		return false
+	end
+
+	local replayed = Reconcile.applySnapshot(svc.ocean, svc.reconciler, {
+		month = snapshot.month,
+		day = snapshot.day,
+		regions = snapshot.regions,
+	})
+
+	svc.backendOnline = true
+	svc.everSynced = true
+
+	-- Replaying on top of every snapshot means a growing queue means we are
+	-- drifting from the shared ocean. That is the signal worth a log line.
+	if replayed > 0 then
+		print(string.format(
+			"[slack-water] global sync: %d unconfirmed catch(es) replayed",
+			replayed
+		))
+	end
+
+	Service.refreshMarket(svc)
+	return true
 end
 
 --- The public tide state, for the HUD and for gating UI before a player tries
@@ -347,12 +423,19 @@ function Service.broadcastOcean(svc: Service): ()
 		end
 	end
 
+	local health = Reconcile.health(svc.reconciler, svc.everSynced)
+
 	svc.remotes[Types.OceanSync]:FireAllClients({
 		month = svc.ocean.month,
 		day = svc.ocean.day,
 		tick = svc.ocean.tickCount,
 		tide = Service.tideState(svc),
 		chartCoverage = Chart.coverage(svc.chart),
+		-- whether this server is describing the shared ocean or its own. Worth
+		-- surfacing: "the ocean is shared" should be a visible claim, not a
+		-- marketing line that is quietly false on an empty server.
+		shared = health.ok and svc.everSynced,
+		sharedStatus = health.reason,
 		regions = regions,
 	})
 end

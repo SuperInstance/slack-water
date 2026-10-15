@@ -130,16 +130,29 @@ function OceanClient.getMarket(): MarketResult
 end
 
 --- Report catches so the global ocean state stays accurate across servers.
-function OceanClient.reportCatch(regionId: string, speciesId: string, effort: number): ()
-	local ok, _, err = request("/ocean/harvest", "POST", {
+---
+--- Returns the number of catches the Worker accepted, which is exactly how many
+--- pending deltas the server may drop from its reconcile queue. Returns 0 on
+--- any failure so a network problem leaves the queue intact and the catch gets
+--- replayed against the next snapshot.
+function OceanClient.reportCatch(regionId: string, speciesId: string, effort: number): number
+	local ok, value, err = request("/ocean/harvest", "POST", {
 		catches = { { regionId = regionId, speciesId = speciesId, effort = effort } },
 	})
+
 	if not ok then
 		-- Intentionally silent. A failed catch report is logged nowhere and
 		-- surfaced to nobody: the local sim already applied the harvest, and a
-		-- visible error would punish the player for a backend problem.
-		return
+		-- visible error would punish the player for a backend problem. The
+		-- pending queue is what keeps this honest, not an error message.
+		return 0
 	end
+
+	local results = value.results or value.catches
+	if type(results) == "table" then
+		return #results
+	end
+	return 0
 end
 
 OceanClient._url = url
