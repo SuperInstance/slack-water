@@ -127,6 +127,72 @@ function Reconcile.reset(reconciler: Reconciler): ()
 end
 
 --=============================================================================
+-- Normalising the wire format
+--=============================================================================
+
+--- The Worker returns the snapshot the way a database naturally returns it: an
+--- array of regions, each with its own array of stock rows.
+---
+---       { regions: [ { id, stocks: [ { speciesId, biomass } ] } ] }
+---
+--- Everything above this line wants the same data keyed for lookup. This is the
+--- boundary where the two shapes meet.
+---
+--- It matters that this is explicit. When the shapes did not match, the merge
+--- silently matched no keys and the ocean quietly stayed per-server forever
+--- with no error anywhere — the worst possible failure mode for the feature
+--- this whole file exists to provide.
+function Reconcile.fromWorker(payload: any): Snapshot?
+	if type(payload) ~= "table" then
+		return nil
+	end
+
+	local regions: { [string]: { [string]: number } } = {}
+	local rawRegions = payload.regions
+
+	-- Accept either the worker's array form or an already-keyed object form.
+	if type(rawRegions) == "table" then
+		if rawRegions[1] ~= nil then
+			for _, region in rawRegions do
+				if type(region) == "table" and type(region.id) == "string" then
+					local stocks: { [string]: number } = {}
+					local rows = region.stocks
+					if type(rows) == "table" then
+						for _, row in rows do
+							if type(row) == "table" and type(row.speciesId) == "string" then
+								local biomass = tonumber(row.biomass)
+								if biomass ~= nil then
+									stocks[row.speciesId] = biomass
+								end
+							end
+						end
+					end
+					regions[region.id] = stocks
+				end
+			end
+		else
+			for regionId, rows in rawRegions do
+				if type(regionId) == "string" and type(rows) == "table" then
+					local stocks: { [string]: number } = {}
+					for speciesId, biomass in rows do
+						if type(speciesId) == "string" and tonumber(biomass) ~= nil then
+							stocks[speciesId] = tonumber(biomass) :: number
+						end
+					end
+					regions[regionId] = stocks
+				end
+			end
+		end
+	end
+
+	return {
+		month = tonumber(payload.month),
+		day = tonumber(payload.day),
+		regions = regions,
+	}
+end
+
+--=============================================================================
 -- Applying a snapshot
 --=============================================================================
 

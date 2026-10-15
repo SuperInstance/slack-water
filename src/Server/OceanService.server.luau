@@ -337,11 +337,17 @@ function Service.pullGlobal(svc: Service): boolean
 		return false
 	end
 
-	local replayed = Reconcile.applySnapshot(svc.ocean, svc.reconciler, {
-		month = snapshot.month,
-		day = snapshot.day,
-		regions = snapshot.regions,
-	})
+	-- Normalise first: the Worker returns regions as an ARRAY of objects each
+	-- carrying an ARRAY of stock rows, while the merge above wants it keyed.
+	-- Passing the raw shape matched nothing and silently left the ocean
+	-- per-server, so the normalisation lives in Reconcile and is pinned by a
+	-- test built from a real capture.
+	local normalised = Reconcile.fromWorker(snapshot)
+	if not normalised then
+		return false
+	end
+
+	local replayed = Reconcile.applySnapshot(svc.ocean, svc.reconciler, normalised)
 
 	svc.backendOnline = true
 	svc.everSynced = true

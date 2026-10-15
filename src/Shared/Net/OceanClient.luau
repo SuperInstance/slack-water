@@ -36,7 +36,8 @@ local OceanClient = {}
 
 --- Base URL of the Worker. Set this to your deployment, or leave it empty to
 --- run in fully-local mode.
-OceanClient.BASE_URL = ""
+-- The deployed Worker. Set to "" to run fully locally.
+OceanClient.BASE_URL = "https://slack-water.casey-digennaro.workers.dev"
 
 --- Seconds before a request is abandoned. Kept short on purpose: a cast must
 --- never hang waiting on the network, and the local simulation can answer

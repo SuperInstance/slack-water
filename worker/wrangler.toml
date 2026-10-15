@@ -10,21 +10,21 @@ binding = "ai"
 # KV is a short-TTL read cache (market snapshots). D1 remains the only source
 # of truth for the ocean; a lost KV entry just costs one extra D1 read.
 #
-# Create the namespace and paste its id below:
+# Created 2026-10-14. Recreate with:
 #   npx wrangler kv namespace create OCEAN_KV
 [[kv_namespaces]]
 binding = "OCEAN_KV"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "6d63e05f75c9410c9dc5b6c043a1f34d"
 
 # The shared ocean. Every Roblox server reads and harvests against this one
 # database, which is what makes the fishery global rather than per-server.
 #
-# Create the database and paste its id below:
+# Created 2026-10-14, region WNAM. Recreate with:
 #   npx wrangler d1 create slack-water-ocean
 [[d1_databases]]
 binding = "DB"
 database_name = "slack-water-ocean"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "d284e3d4-4b7d-4eb3-9d3c-68294f2b7db8"
 
 # One simulation tick per minute: 12 ticks/day, 4 days/month, 12 months/year
 # (the Config.luau calendar), so a full in-game year takes 9.6 wall-clock hours.

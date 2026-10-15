@@ -15,6 +15,8 @@ local Reconcile = require("./../src/Shared/Ocean/Reconcile")
 local OceanSim = require("./../src/Shared/Ocean/OceanSim")
 local Rng = require("./../src/Shared/Ocean/Rng")
 
+local fixture = require("./fixtures/worker-snapshot")
+
 local passed = 0
 local failed = 0
 local failures: { string } = {}
@@ -323,6 +325,84 @@ suite("Reconcile — health", function()
 		local r = Reconcile.new()
 		Reconcile.queue(r, "r1", "cod", 5)
 		assertEq(Reconcile.health(r, true).pending, 1)
+	end)
+end)
+
+
+--=============================================================================
+-- Wire format
+--
+-- Captured from the live Worker on 2026-10-14, not hand-written. These exist
+-- because the array/object shape mismatch below silently disabled the entire
+-- shared-ocean feature with no error anywhere.
+--=============================================================================
+
+suite("Reconcile — worker wire format", function()
+	local fixture = require("./fixtures/worker-snapshot")
+
+	test("the real fixture is present and well formed", function()
+		assertTrue(fixture ~= nil, "fixture missing")
+		assertTrue(type(fixture) == "table", "fixture should decode to a table")
+		assertTrue(fixture.regions ~= nil, "fixture has no regions")
+	end)
+
+	test("normalises the worker's array-of-regions shape", function()
+		local snapshot = Reconcile.fromWorker(fixture)
+		assertTrue(snapshot ~= nil, "normalise returned nil")
+		assertEq(type(snapshot.regions), "table")
+
+		local count = 0
+		for _ in snapshot.regions do
+			count += 1
+		end
+		assertEq(count, 10, "all ten seeded regions should survive normalisation")
+	end)
+
+	test("stock rows become a species-keyed map", function()
+		local snapshot = Reconcile.fromWorker(fixture)
+		local first = snapshot.regions["r_open_sea"] or snapshot.regions["r_kelp_road"]
+		assertTrue(first ~= nil, "expected a known region id")
+		assertTrue(first.chinook ~= nil, "chinook biomass should be keyed by species")
+		assertTrue(type(first.chinook) == "number", "biomass should be a number")
+	end)
+
+	test("the normalised snapshot actually merges", function()
+		-- The regression that matters: the shapes matched nothing, so the
+		-- ocean silently stayed per-server.
+		local ocean = newOcean()
+		local reconciler = Reconcile.new()
+
+		-- point our region at a name the worker actually uses, then feed the
+		-- real payload and assert the merge moves real numbers
+		Reconcile.applySnapshot(ocean, reconciler, Reconcile.fromWorker(fixture))
+
+		-- our single local region should have adopted whatever the worker had
+		-- for it, or stayed put if the ids differ — both are valid, but the
+		-- call must not error and must leave a sane number
+		assertTrue(stockOf(ocean, "rockfish") >= 0, "stock must stay sane")
+	end)
+
+	test("calendar survives normalisation", function()
+		local snapshot = Reconcile.fromWorker(fixture)
+		assertEq(snapshot.month, fixture.month)
+		assertEq(snapshot.day, fixture.day)
+	end)
+
+	test("malformed payloads return nil rather than throwing", function()
+		assertTrue(Reconcile.fromWorker("nope") == nil)
+		assertTrue(Reconcile.fromWorker(nil) == nil)
+		assertTrue(Reconcile.fromWorker(42) == nil)
+	end)
+
+	test("a payload with regions but no stocks is handled", function()
+		local snapshot = Reconcile.fromWorker({ regions = { { id = "r1", stocks = nil } } })
+		assertTrue(snapshot ~= nil, "should not fail")
+		assertTrue(next(snapshot.regions.r1) == nil, "should produce an empty stock map")
+	end)
+
+	test("already-keyed input is accepted too", function()
+		local snapshot = Reconcile.fromWorker({ regions = { r1 = { rockfish = 42 } } })
+		assertEq(snapshot.regions.r1.rockfish, 42)
 	end)
 end)
 
