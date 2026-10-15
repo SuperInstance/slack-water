@@ -242,6 +242,35 @@ suite("worldgen — a player can stand in this world", function()
 		assertTrue(deck.Size.X > 0 and deck.Size.Y > 0 and deck.Size.Z > 0, "Deck has a zero size")
 	end)
 
+	test("the boat is a boat, not a slab", function()
+		-- The world used to put a 24x24 brown box in the water whose entire
+		-- purpose was to stop the player falling out of the world. Every test
+		-- in this file passed while that was all the boat was.
+		--
+		-- These assertions are the ones that would have failed. They are here
+		-- so "somebody simplified the boat back to a placeholder" is a red
+		-- test rather than something nobody notices for another month.
+		local boat = findDescendant(oceanFolder, "FVEileen")
+		assertTrue(boat ~= nil, "no FVEileen model in the world")
+
+		for _, required in { "Deck", "Deckhouse", "Pilothouse", "Mast", "NetReel" } do
+			assertTrue(
+				findDescendant(boat, required) ~= nil,
+				"the boat has no " .. required .. " — it is back to being a slab"
+			)
+		end
+
+		local parts = boat:GetChildren()
+		assertTrue(
+			#parts >= 15,
+			"the boat has only " .. tostring(#parts) .. " parts; that is a slab, not a working boat"
+		)
+
+		-- The hull must be long enough to read as a vessel from the water.
+		local deck = findDescendant(boat, "Deck")
+		assertTrue(deck.Size.X >= 40, "the deck is too short to read as a boat")
+	end)
+
 	test("a spawn location exists on the boat", function()
 		local spawn = findDescendant(oceanFolder, "Spawn")
 		assertTrue(spawn ~= nil, "no Spawn anywhere in the built world")

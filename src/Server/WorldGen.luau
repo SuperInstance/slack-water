@@ -97,13 +97,44 @@ function WorldGenService.buildDeck(folder: any): any
 	local deck = Instance.new("Model")
 	deck.Name = "FVEileen"
 
-	-- Hull: a solid slab. Not a boat shape — this is a collision surface with
-	-- a name, and pretending otherwise on a prototype just makes the spawn
-	-- worse to stand on.
+	-- NOTE ON WHY THIS IS PARTS AND NOT THE BLENDER MESH
+	-- --------------------------------------------------
+	-- art/fv_eileen/ holds a lofted FBX of the real boat, built from the
+	-- owner's photographs. It cannot be used directly: Rojo does not embed
+	-- binary assets in the place it builds, and Roblox cannot import an FBX
+	-- at runtime. The mesh only becomes usable if it is uploaded to Roblox as
+	-- an asset and referenced by id — see MESH_ID below.
+	--
+	-- Until then the boat is built from Parts so it ships through Rojo. The
+	-- silhouette is a real attempt at the Eileen rather than a placeholder
+	-- slab, and the parts count is small enough for mobile.
+	--
+	-- SAFETY: whatever the visual, there is ALWAYS a collidable deck under
+	-- the player. Showstopper #2 was a player falling through the world
+	-- because the deck had CanCollide = false. No amount of prettiness is
+	-- worth reintroducing that.
+	local MESH_ID = "" -- set to a Roblox asset id to swap the hull for the mesh
+
+	if MESH_ID ~= "" then
+		local mesh = Instance.new("MeshPart")
+		mesh.Name = "HullMesh"
+		mesh.MeshId = MESH_ID
+		mesh.Size = Vector3.new(58, 1, 16)
+		mesh.CFrame = CFrame.new(0, 0, 0)
+		mesh.Anchored = true
+		mesh.CanCollide = false -- collision stays on Deck, deliberately
+		mesh.Parent = deck
+	end
+
+	local HULL_LEN, HULL_BEAM = 58, 16
+	local DECK_Y = 4.4 -- sheer height; the waterline stays at y = 0
+
+	-- Collision surface. A single wide slab, inset from the visible hull so
+	-- a player cannot stand on an overhanging edge of nothing.
 	local hull = Instance.new("Part")
 	hull.Name = "Deck"
-	hull.Size = Vector3.new(24, 5.5, 24)
-	hull.CFrame = CFrame.new(0, 0.75, 0) -- spans y -2 .. +3.5; waterline at 0
+	hull.Size = Vector3.new(HULL_LEN - 6, 1.0, HULL_BEAM - 3)
+	hull.CFrame = CFrame.new(0, DECK_Y, 0)
 	hull.Anchored = true
 	hull.CanCollide = true
 	hull.Material = Enum.Material.WoodPlanks
@@ -112,33 +143,176 @@ function WorldGenService.buildDeck(folder: any): any
 	hull.BottomSurface = Enum.SurfaceType.Smooth
 	hull.Parent = deck
 
-	-- A rail so the deck reads as a boat from a distance and gives the eye a
-	-- horizon reference when you are standing on it.
-	for _, offset in { Vector3.new(0, 3, -12), Vector3.new(0, 3, 12) } do
-		local rail = Instance.new("Part")
-		rail.Name = "Rail"
-		rail.Size = Vector3.new(24, 4, 1)
-		rail.CFrame = CFrame.new(offset.X, 6, offset.Z)
-		rail.Anchored = true
-		rail.CanCollide = false
-		rail.Material = Enum.Material.WoodPlanks
-		rail.Color = Color3.fromRGB(96, 74, 50)
-		rail.Transparency = 0.35
-		rail.Parent = deck
+	-- The visible hull: a tapered stack of slabs following the real sheer
+	-- curve, white topsides over dark antifouling below the waterline.
+	local tiers = {
+		{ y = 2.6, len = HULL_LEN - 2, beam = HULL_BEAM - 1.5 },
+		{ y = 1.2, len = HULL_LEN - 1, beam = HULL_BEAM },
+		{ y = 0.0, len = HULL_LEN, beam = HULL_BEAM },
+		{ y = -1.6, len = HULL_LEN - 3, beam = HULL_BEAM - 2.5 },
+		{ y = -3.2, len = HULL_LEN - 9, beam = HULL_BEAM - 6 },
+	}
+	for i, t in tiers do
+		local part = Instance.new("Part")
+		part.Name = "HullTier"
+		part.Size = Vector3.new(t.len, 2.0, t.beam)
+		part.CFrame = CFrame.new(0, t.y, 0)
+		part.Anchored = true
+		part.CanCollide = false
+		part.CastShadow = false
+		-- Below the waterline is antifouling; above it is white topsides.
+		if t.y < 0 then
+			part.Material = Enum.Material.SmoothPlastic
+			part.Color = Color3.fromRGB(18, 26, 38)
+		else
+			part.Material = Enum.Material.SmoothPlastic
+			part.Color = Color3.fromRGB(224, 226, 224)
+		end
+		part.Parent = deck
+		-- The bow is finer than the stern on a real hull.
+		part:SetAttribute("tier", i)
 	end
 
-	-- Mast: the tallest thing on the deck, so "which way am I facing" is
-	-- answerable from the boat alone.
+	-- Sheer stripe / rubbing strake, the line that reads the hull length.
+	local strake = Instance.new("Part")
+	strake.Name = "SheerStripe"
+	strake.Size = Vector3.new(HULL_LEN - 1, 0.5, HULL_BEAM + 0.3)
+	strake.CFrame = CFrame.new(0, DECK_Y - 0.6, 0)
+	strake.Anchored = true
+	strake.CanCollide = false
+	strake.Material = Enum.Material.SmoothPlastic
+	strake.Color = Color3.fromRGB(198, 190, 168)
+	strake.Parent = deck
+
+	-- Bulwark round the working deck.
+	for _, side in { -1, 1 } do
+		local bw = Instance.new("Part")
+		bw.Name = "Bulwark"
+		bw.Size = Vector3.new(HULL_LEN - 12, 2.2, 0.5)
+		bw.CFrame = CFrame.new(-2, DECK_Y + 1.1, side * (HULL_BEAM * 0.5 - 0.9))
+		bw.Anchored = true
+		bw.CanCollide = false
+		bw.Material = Enum.Material.SmoothPlastic
+		bw.Color = Color3.fromRGB(224, 226, 224)
+		bw.Parent = deck
+	end
+
+	-- Main deckhouse: a row of windows, as on the real boat.
+	local house = Instance.new("Part")
+	house.Name = "Deckhouse"
+	house.Size = Vector3.new(17, 4.5, 12.5)
+	house.CFrame = CFrame.new(-8, DECK_Y + 2.75, 0)
+	house.Anchored = true
+	house.CanCollide = false
+	house.Material = Enum.Material.SmoothPlastic
+	house.Color = Color3.fromRGB(232, 232, 228)
+	house.Parent = deck
+	for k = 0, 4 do
+		local win = Instance.new("Part")
+		win.Name = "HouseWindow"
+		win.Size = Vector3.new(2.1, 1.3, 0.3)
+		win.CFrame = CFrame.new(-14.4 + k * 3.2, DECK_Y + 3.2, 6.35)
+		win.Anchored = true
+		win.CanCollide = false
+		win.Material = Enum.Material.Glass
+		win.Color = Color3.fromRGB(40, 52, 60)
+		win.Parent = deck
+	end
+
+	-- Raised pilothouse forward of it — the two-tier profile is the single
+	-- most recognisable thing about the Eileen.
+	local pilot = Instance.new("Part")
+	pilot.Name = "Pilothouse"
+	pilot.Size = Vector3.new(11, 4.0, 10.6)
+	pilot.CFrame = CFrame.new(7, DECK_Y + 7.0, 0)
+	pilot.Anchored = true
+	pilot.CanCollide = false
+	pilot.Material = Enum.Material.SmoothPlastic
+	pilot.Color = Color3.fromRGB(238, 238, 234)
+	pilot.Parent = deck
+	for _, side in { -1, 1 } do
+		local w = Instance.new("Part")
+		w.Name = "PilotWindow"
+		w.Size = Vector3.new(2.4, 1.5, 0.3)
+		w.CFrame = CFrame.new(7 - 2.6, DECK_Y + 7.3, side * 5.35)
+		w.Anchored = true
+		w.CanCollide = false
+		w.Material = Enum.Material.Glass
+		w.Color = Color3.fromRGB(40, 52, 60)
+		w.Parent = deck
+	end
+
+	-- Spreader mast with its cross-tree, on the pilothouse roof.
 	local mast = Instance.new("Part")
 	mast.Name = "Mast"
-	mast.Size = Vector3.new(1, 34, 1)
-	mast.CFrame = CFrame.new(0, 20, 0)
+	mast.Size = Vector3.new(0.7, 22, 0.7)
+	mast.CFrame = CFrame.new(7, DECK_Y + 19, 0)
 	mast.Anchored = true
 	mast.CanCollide = false
 	mast.Material = Enum.Material.Wood
-	mast.Color = Color3.fromRGB(108, 84, 58)
-	mast.Transparency = 0.25
+	mast.Color = Color3.fromRGB(228, 228, 224)
 	mast.Parent = deck
+
+	local tree = Instance.new("Part")
+	tree.Name = "MastCrosstree"
+	tree.Size = Vector3.new(0.5, 0.5, 8)
+	tree.CFrame = CFrame.new(7, DECK_Y + 24, 0)
+	tree.Anchored = true
+	tree.CanCollide = false
+	tree.Material = Enum.Material.Wood
+	tree.Color = Color3.fromRGB(228, 228, 224)
+	tree.Parent = deck
+
+	-- Working gear aft: net reel under tarp, and the A-frame at the transom.
+	local reel = Instance.new("Part")
+	reel.Name = "NetReel"
+	reel.Size = Vector3.new(9, 3.2, 10)
+	reel.CFrame = CFrame.new(-18, DECK_Y + 2.1, 0)
+	reel.Anchored = true
+	reel.CanCollide = false
+	reel.Material = Enum.Material.Fabric
+	reel.Color = Color3.fromRGB(58, 58, 62)
+	reel.Parent = deck
+
+	for _, side in { -1, 1 } do
+		local leg = Instance.new("Part")
+		leg.Name = "AFrame"
+		leg.Size = Vector3.new(0.6, 9, 0.6)
+		leg.CFrame = CFrame.new(-26, DECK_Y + 5, side * 2.8)
+		leg.Anchored = true
+		leg.CanCollide = false
+		leg.Material = Enum.Material.Metal
+		leg.Color = Color3.fromRGB(150, 152, 156)
+		leg.Parent = deck
+	end
+
+	-- Green net floats and the orange buoy, outboard on the rail.
+	for k = 0, 3 do
+		local f = Instance.new("Part")
+		f.Name = "NetFloat"
+		f.Shape = Enum.PartType.Cylinder
+		f.Size = Vector3.new(2.6, 1.7, 1.7)
+		f.CFrame = CFrame.new(2 + k * 2.4, DECK_Y + 2.6, -(HULL_BEAM * 0.5 + 0.4))
+			* CFrame.Angles(0, 0, math.rad(90))
+		f.Anchored = true
+		f.CanCollide = false
+		f.Material = Enum.Material.SmoothPlastic
+		f.Color = Color3.fromRGB(30, 132, 62)
+		f.Parent = deck
+	end
+	local buoy = Instance.new("Part")
+	buoy.Name = "Buoy"
+	buoy.Shape = Enum.PartType.Cylinder
+	buoy.Size = Vector3.new(3.2, 2.1, 2.1)
+	buoy.CFrame = CFrame.new(9, DECK_Y + 2.8, HULL_BEAM * 0.5 + 0.5)
+		* CFrame.Angles(0, 0, math.rad(90))
+	buoy.Anchored = true
+	buoy.CanCollide = false
+	buoy.Material = Enum.Material.SmoothPlastic
+	buoy.Color = Color3.fromRGB(214, 74, 20)
+	buoy.Parent = deck
+
+	deck.PrimaryPart = hull
 
 	-- A floating pontoon out to where arrivals land. Main drops every
 	-- character at (0, 40, 90): before the ocean existed that put them on
@@ -148,8 +322,12 @@ function WorldGenService.buildDeck(folder: any): any
 	-- part of the boat model it rides the tide with it.
 	local dock = Instance.new("Part")
 	dock.Name = "Dock"
-	dock.Size = Vector3.new(8, 2, 104)
-	dock.CFrame = CFrame.new(0, 2.5, 64) -- spans z 12..116; top level with the deck
+	dock.Size = Vector3.new(8, 2, 86)
+	-- Starts clear of the hull (which now runs z -29..29) and its top is level
+	-- with the deck top at y = 4.9, so a player can step aboard rather than
+	-- climb a wall. The old slab was only 24 long and the dock began at z=12,
+	-- which put it inside the new hull.
+	dock.CFrame = CFrame.new(0, 3.9, 73) -- spans z 30..116
 	dock.Anchored = true
 	dock.CanCollide = true
 	dock.Material = Enum.Material.WoodPlanks
@@ -177,7 +355,9 @@ function WorldGenService.buildSpawn(folder: any): any
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Name = "Spawn"
 	spawn.Size = Vector3.new(10, 1, 10)
-	spawn.CFrame = CFrame.new(0, 4, 0)
+	-- Sits just above the Deck collision surface (top at y = 4.9) rather than
+	-- at the old slab's height, so arrivals stand on the boat, not inside it.
+	spawn.CFrame = CFrame.new(0, 5.4, 0)
 	spawn.Anchored = true
 	spawn.Neutral = true
 	spawn.Duration = 0
