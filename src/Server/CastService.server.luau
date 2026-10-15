@@ -4,9 +4,9 @@
 
 	The whole security model of the game lives in this file, and it is one rule:
 	the client sends intent, never outcome. A client says "I cast at this region
-	for this species with this gear"; it never says "I caught 40 halibut". Every
-	number that appears in a result is computed here, on the server, from the
-	shared simulation.
+	for this species"; it never says "I caught 40 halibut", and it never says
+	what gear it holds — the profile does. Every number that appears in a
+	result is computed here, on the server, from the shared simulation.
 
 	That matters because the ocean is shared. If a modified client could write to
 	a stock, one player could drain a fishery for everyone.
@@ -20,13 +20,11 @@ local Types = require(Shared.Types)
 local Species = require(Shared.Species)
 local OceanSim = require(Shared.Ocean.OceanSim)
 local Config = require(Shared.Config)
+local Progression = require(Shared.Progression)
 local OceanService = require(script.Parent.OceanService)
+local ProfileService = require(script.Parent.ProfileService)
 
 local CastService = {}
-
---- Gear is server-authoritative. A client may ask for better gear, but the
---- effective effort is clamped to what that gear actually provides.
-local DEFAULT_GEAR = Types.Gear.handline
 
 --- Per-player rate limiting.
 ---
@@ -44,17 +42,6 @@ local function isRateLimited(player: any): boolean
 	end
 	lastCastAt[player] = now
 	return false
-end
-
-local function gearEffortFor(player: any, requestedGearId: string?): any
-	if type(requestedGearId) ~= "string" then
-		return DEFAULT_GEAR
-	end
-	local gear = Types.Gear[requestedGearId]
-	if not gear then
-		return DEFAULT_GEAR
-	end
-	return gear
 end
 
 --- Roll a plausible body weight for the catch.
@@ -86,6 +73,7 @@ end
 function CastService.start(): ()
 	local svc = OceanService.start()
 	local remotes = svc.remotes
+	local profiles = ProfileService.start()
 
 	remotes[Types.CastRequest].OnServerEvent:Connect(function(player: any, payload: any)
 		if typeof(payload) ~= "table" then
@@ -165,15 +153,20 @@ function CastService.start(): ()
 			return
 		end
 
-		-- Clamp the client's effort claim to the gear it says it holds. Effort
-		-- is the only client-influenced input to the simulation, so this is the
-		-- line between a player rolling well and a player cheating.
+		-- Clamp the client's effort claim to the gear in the player's profile.
+		-- Effort is the only client-influenced input to the simulation, so
+		-- this is the line between a player rolling well and a player
+		-- cheating. The gear comes from ProfileService — the server's own
+		-- record of what this skipper holds — and any gear claim inside the
+		-- cast payload itself is ignored: changing gear is a separate request
+		-- the server validates against ownership.
 		--
 		-- A non-positive or missing claim falls back to the gear's own rating
 		-- rather than being taken as a literal zero. The client deliberately
 		-- sends effort = 0 — it has no idea what a good cast is worth — so
 		-- trusting that number would mean nothing is ever caught.
-		local gear = gearEffortFor(player, payload.gearId)
+		local profile = ProfileService.profileFor(profiles, player)
+		local gear = Progression.equippedGear(profile)
 		local claimed = tonumber(payload.effort) or 0
 		local effort = if claimed > 0 then math.clamp(claimed, 0, gear.effort) else gear.effort
 
@@ -215,6 +208,27 @@ function CastService.start(): ()
 
 		local inRun = species.anadromous and Species.isRunning(species, svc.ocean.month)
 
+		-- Credit the career. Every field of the record is what this server
+		-- derived for the cast: the biomass OceanSim landed, the effort the
+		-- gear actually made available (the clamped value — Progression shapes
+		-- the tide in itself, via tideQuality, so the tide is not counted
+		-- twice), and the ground's abundance BEFORE the cast. Progression owns
+		-- every rule about what that is worth; nothing here may flatten it.
+		local outcome = ProfileService.awardCatch(profiles, player, {
+			speciesId = species.id,
+			yielded = result.yielded,
+			effortUsed = effort,
+			abundanceBefore = result.abundanceBefore,
+			tideQuality = result.tideQuality,
+		})
+
+		local unlockedIds: { string } = {}
+		if outcome then
+			for _, unlocked in outcome.unlockedGear do
+				table.insert(unlockedIds, unlocked.id)
+			end
+		end
+
 		remotes[Types.CastResult]:FireClient(player, {
 			ok = true,
 			speciesId = speciesId,
@@ -230,6 +244,12 @@ function CastService.start(): ()
 			rare = rollRare(species, result.abundanceBefore, performance, rng),
 			inRun = inRun,
 			tideQuality = result.tideQuality or 0,
+			-- career fields (pending Types.luau additions): the skipper's
+			-- state after this cast, straight from Progression via the profile
+			level = if outcome then outcome.level else nil,
+			xpGained = if outcome then outcome.xpGained else 0.0,
+			unlockedGear = unlockedIds,
+			currentGearId = gear.id,
 		})
 
 		-- Tell everyone at the ground that it is being worked, so other crews
@@ -260,7 +280,5 @@ function CastService.start(): ()
 
 	print("[slack-water] cast service listening")
 end
-
-CastService._DEFAULT_GEAR = DEFAULT_GEAR
 
 return CastService

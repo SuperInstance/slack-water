@@ -64,6 +64,9 @@ export type Snapshot = {
 	month: number?,
 	day: number?,
 	regions: { [string]: { [string]: number } }?, -- regionId -> speciesId -> biomass
+	-- The Worker owns the geography, so it also carries the region definitions
+	-- a server needs in order to render ground it has never heard of.
+	regionDefs: { [string]: any }?,
 }
 
 export type Reconciler = {
@@ -148,6 +151,7 @@ function Reconcile.fromWorker(payload: any): Snapshot?
 	end
 
 	local regions: { [string]: { [string]: number } } = {}
+	local regionDefs: { [string]: any } = {}
 	local rawRegions = payload.regions
 
 	-- Accept either the worker's array form or an already-keyed object form.
@@ -168,6 +172,18 @@ function Reconcile.fromWorker(payload: any): Snapshot?
 						end
 					end
 					regions[region.id] = stocks
+
+					-- Keep the geography too. A server must be able to render a
+					-- ground the AI invented, including ones it has never seen.
+					regionDefs[region.id] = {
+						id = region.id,
+						name = region.name,
+						habitat = region.habitat,
+						depth = region.depth,
+						salinity = region.salinity,
+						richness = region.richness,
+						origin = region.origin,
+					}
 				end
 			end
 		else
@@ -189,7 +205,77 @@ function Reconcile.fromWorker(payload: any): Snapshot?
 		month = tonumber(payload.month),
 		day = tonumber(payload.day),
 		regions = regions,
+		regionDefs = regionDefs,
 	}
+end
+
+--- Make the local ocean contain every region the Worker knows about.
+---
+--- THIS IS THE ONE THAT MATTERS.
+---
+--- A Roblox server used to seed its own `r1..r14` while the Worker held
+--- `r_kelp_road`, `r_flattop_sand` and whatever the model had invented. Not one
+--- id matched, so every snapshot merged nothing and the "shared ocean" was two
+--- oceans that happened to be served by the same codebase. The tests were green
+--- throughout, because the shape was right and the KEYS were wrong.
+---
+--- A snapshot with mismatched ids is not a small drift; it means the two sides
+--- are describing different geography, and no amount of keying fixes that.
+--- The Worker is authoritative for where the water is, so the server adopts.
+---
+--- Returns how many regions were adopted.
+function Reconcile.ensureRegions(ocean: any, snapshot: Snapshot): number
+	local defs = snapshot.regionDefs
+	if type(defs) ~= "table" then
+		return 0
+	end
+
+	local adopted = 0
+
+	-- Deterministic order so two servers adopting the same snapshot produce the
+	-- same region sequence.
+	local ids: { string } = {}
+	for id in defs do
+		table.insert(ids, id)
+	end
+	table.sort(ids)
+
+	for _, id in ids do
+		local def = defs[id]
+		if ocean.regions[id] == nil and type(def) == "table" then
+			OceanSim.addRegion(ocean, {
+				id = def.id,
+				name = def.name or def.id,
+				habitat = def.habitat or "open",
+				depth = tonumber(def.depth) or 40,
+				salinity = tonumber(def.salinity) or 32,
+				richness = tonumber(def.richness) or 1.0,
+				origin = def.origin or "procedural",
+			})
+			adopted += 1
+		end
+	end
+
+	return adopted
+end
+
+--- How much of the Worker's geography the local ocean is missing.
+---
+--- A non-zero value for long is the signal that this server is describing a
+--- different world from everyone else.
+function Reconcile.missingRegions(ocean: any, snapshot: Snapshot): number
+	local defs = snapshot.regionDefs
+	if type(defs) ~= "table" then
+		return 0
+	end
+
+	local missing = 0
+	for id in defs do
+		if ocean.regions[id] == nil then
+			missing += 1
+		end
+	end
+	return missing
 end
 
 --=============================================================================

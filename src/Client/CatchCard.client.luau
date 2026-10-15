@@ -151,7 +151,16 @@ local function main(): ()
 		local token = cardToken
 
 		local species = Species.get(p.speciesId)
-		local celebrate = p.rare == true or p.inRun == true
+
+		-- career fields are pending Types.luau additions, so they are read
+		-- untyped and rendered only when present; command-bar fixtures and
+		-- older payloads still lay out cleanly
+		local add: any = p
+		local levelUp = type(add.level) == "number"
+			and type(add.unlockedGear) == "table"
+			and #add.unlockedGear > 0
+
+		local celebrate = p.rare == true or p.inRun == true or levelUp
 
 		local card = Ui.frame(root, {
 			name = "CatchCard",
@@ -230,6 +239,31 @@ local function main(): ()
 			size = UDim2.new(1, 0, 0, 24),
 			xalign = Enum.TextXAlignment.Center,
 		})
+
+		-- what the catch taught the skipper, next to what it paid
+		if type(add.xpGained) == "number" and add.xpGained > 0 then
+			Ui.label(card, {
+				text = "+" .. Ui.formatInt(add.xpGained) .. " xp",
+				textSize = 11.5,
+				color = "dim",
+				size = UDim2.new(1, 0, 0, 14),
+				xalign = Enum.TextXAlignment.Center,
+			})
+		end
+
+		if levelUp then
+			local names: { string } = {}
+			for _, id in add.unlockedGear do
+				local gear = Types.Gear[id]
+				table.insert(names, if gear then gear.displayName else id)
+			end
+			banner(
+				card,
+				("LEVEL %d — %s within reach"):format(math.floor(add.level), table.concat(names, ", ")),
+				"gold",
+				true
+			)
+		end
 
 		-- the flags, each in its own voice
 		if p.inRun == true then

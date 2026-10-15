@@ -366,20 +366,79 @@ suite("Reconcile — worker wire format", function()
 		assertTrue(type(first.chinook) == "number", "biomass should be a number")
 	end)
 
-	test("the normalised snapshot actually merges", function()
-		-- The regression that matters: the shapes matched nothing, so the
-		-- ocean silently stayed per-server.
+	test("the normalised snapshot REALLY merges into a server-seeded ocean", function()
+		-- This is the test that should have existed from the start. It compares
+		-- actual region IDS, because the shape being right is not the same as
+		-- the keys matching: a Roblox server seeded r1..r14 against a Worker
+		-- holding r_kelp_road and friends merged nothing at all, and every
+		-- other test here stayed green while it did.
+		local ocean = newOcean() -- local id is "r1"
+		local snapshot = Reconcile.fromWorker(fixture)
+
+		local workerIds = {}
+		for id in snapshot.regions do
+			table.insert(workerIds, id)
+		end
+		assertTrue(#workerIds > 0, "fixture should carry worker regions")
+
+		local adopted = Reconcile.ensureRegions(ocean, snapshot)
+		assertTrue(adopted > 0, "the server adopted none of the worker's geography")
+
+		-- now the stock table must actually carry worker data
+		Reconcile.applySnapshot(ocean, Reconcile.new(), snapshot)
+		local mergedSomething = false
+		for _, id in workerIds do
+			local stocks = ocean.stocks[id]
+			if stocks then
+				for speciesId, biomass in stocks do
+					if type(speciesId) == "string" and biomass > 0 then
+						mergedSomething = true
+					end
+				end
+			end
+		end
+		assertTrue(mergedSomething, "no worker biomass landed in the local ocean")
+		assertTrue(stockOf(ocean, "rockfish") > 0, "local region should remain sane")
+	end)
+
+	test("missingRegions detects an unshared geography", function()
 		local ocean = newOcean()
-		local reconciler = Reconcile.new()
+		local snapshot = Reconcile.fromWorker(fixture)
+		local missing = Reconcile.missingRegions(ocean, snapshot)
+		assertTrue(missing > 0, "a server seeded r1 should be missing every worker region")
+	end)
 
-		-- point our region at a name the worker actually uses, then feed the
-		-- real payload and assert the merge moves real numbers
-		Reconcile.applySnapshot(ocean, reconciler, Reconcile.fromWorker(fixture))
+	test("adoption is idempotent", function()
+		local ocean = newOcean()
+		local snapshot = Reconcile.fromWorker(fixture)
+		Reconcile.ensureRegions(ocean, snapshot)
+		local second = Reconcile.ensureRegions(ocean, snapshot)
+		assertEq(second, 0, "a second adoption should have nothing to do")
+		assertEq(Reconcile.missingRegions(ocean, snapshot), 0)
+	end)
 
-		-- our single local region should have adopted whatever the worker had
-		-- for it, or stayed put if the ids differ — both are valid, but the
-		-- call must not error and must leave a sane number
-		assertTrue(stockOf(ocean, "rockfish") >= 0, "stock must stay sane")
+	test("AI-composed banks are adopted like any other region", function()
+		-- The composer invents grounds the server has never seen. If adoption
+		-- skips them, the entire content treadmill is invisible in-game.
+		local snapshot = Reconcile.fromWorker(fixture)
+		local composed = 0
+		for id in snapshot.regionDefs do
+			local def = snapshot.regionDefs[id]
+			if type(def) == "table" and def.origin == "composed" then
+				composed += 1
+			end
+		end
+		assertTrue(composed > 0, "the fixture should contain at least one AI-composed bank")
+
+		local ocean = newOcean()
+		local adopted = Reconcile.ensureRegions(ocean, snapshot)
+		assertTrue(adopted >= composed, "composed banks must be adopted")
+	end)
+
+	test("a snapshot with no region definitions is harmless", function()
+		local ocean = newOcean()
+		assertEq(Reconcile.ensureRegions(ocean, { regions = {} }), 0)
+		assertEq(Reconcile.missingRegions(ocean, { regions = {} }), 0)
 	end)
 
 	test("calendar survives normalisation", function()

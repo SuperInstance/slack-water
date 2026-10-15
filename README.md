@@ -246,6 +246,13 @@ disagreement: the Roblox tick ran every 20s and the Worker cron every 60s, so
 the two implementations disagreed about what a day was — which would have
 quietly desynced the salmon runs.
 
+**The Worker also owns the geography.** A server seeds its own provisional
+regions, but on first sync it adopts every region the Worker knows about,
+including ones the model invented that it has never heard of. This was not
+optional: the server seeded `r1..r14` while the Worker held `r_kelp_road`,
+`r_flattop_sand` and the composed banks, so **not one id matched** and every
+snapshot merged nothing. Two oceans, same codebase, tests green the whole time.
+
 `OceanSync` carries `shared` and `sharedStatus` so a client can tell whether it
 is looking at the shared ocean or a private one. "The ocean is shared" should be
 a visible claim, not a marketing line that is quietly false on an empty server.
@@ -302,7 +309,7 @@ The server seeds a 14-region ocean and prints:
 ### Tests
 
 ```bash
-./tests/run.sh          # 160 tests, no Studio required
+./tests/run.sh          # 172 tests, no Studio required
 ```
 
 Two suites:
@@ -372,10 +379,10 @@ tension.
 
 ## Known gaps
 
-- The Worker is wired for composition and for catch reconciliation, but it has
-  never been deployed: `wrangler.toml` still has placeholder binding ids. Until
-  someone runs `wrangler d1 create` and `wrangler deploy`, every server runs its
-  own ocean and `sharedStatus` will honestly say `"local"`.
+- The Worker is deployed and running at
+  `https://slack-water.casey-digennaro.workers.dev` with a real D1 database and
+  KV namespace. The live AI composer returns real banks. What has NOT happened
+  yet is a Roblox server actually syncing against it — that needs Studio.
 - No persistence layer yet — local simulation state is not saved across server
   restarts. The D1 copy is durable; the mirror is not.
 - Art is placeholder geometry. The world is built from discs and labels; the

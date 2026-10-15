@@ -347,6 +347,14 @@ function Service.pullGlobal(svc: Service): boolean
 		return false
 	end
 
+	-- Adopt the Worker's geography BEFORE merging stocks. A server that seeded
+	-- its own regions shares no ids with the backend, so it would merge nothing
+	-- and quietly keep fishing a private ocean while reporting success.
+	local adopted = Reconcile.ensureRegions(svc.ocean, normalised)
+	if adopted > 0 then
+		print(string.format("[slack-water] adopted %d region(s) from the global ocean", adopted))
+	end
+
 	local replayed = Reconcile.applySnapshot(svc.ocean, svc.reconciler, normalised)
 
 	svc.backendOnline = true

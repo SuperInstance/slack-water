@@ -17,6 +17,7 @@ server stays the sole authority on time.
 | `MarketPanel.client.luau` | MarketSync list, sorted by price. `RISING ▲` rows get a gold edge; scarce species (Shared `Market.isScarce` on server-sent numbers) get a red SCARCE chip. That callout *is* the player's routing decision. |
 | `RegionChart.client.luau` | OceanSync grounds list, sorted richest-first: name, habitat (colour-stable across the UI), charted depth, what is present, and an abundance bar colour-coded against `Config.COLLAPSE_THRESHOLD`. Below-threshold grounds read `PICKED OVER`; any contested species flags `⚔ CONTESTED`. |
 | `Notify.client.luau` | Toasts from Notify payloads (kinds: run/scarcity/contest/market/discover, each with its own icon+colour), plus RegionDiscovered mapped to a `discover` toast. Max 4 stacked, auto-dismiss. |
+| `GearBar.client.luau` | The skipper's career sheet: level, xp bar and the gear ladder from ProfileSync (server-computed, sent to this player only). Owned gear rows send a `GearRequest` and re-render whatever the server answers; locked rows show the level requirement. Never computes effort or predicts yield. |
 | `Casting.client.luau` | **Owned by another agent — do not edit here.** It is the fight minigame's state machine and creates no UI, so it neither collides with nor is referenced by these panels. |
 
 ## Layout (designed at 390x844, scaled everywhere else)
@@ -32,10 +33,12 @@ a full-screen transparent root, and one `UIScale` (`Ui.autoScale`) clamped to
 │            (water — keep clear)     │
 │ Notify toasts (transient)           │  from y 204, centred, auto-dismiss
 │                                     │
-│                     [💰] [🗺️]       │  right edge, y ~40%/58%
-│         MarketPanel / RegionChart   │  sheets slide in from the right
+│                     [💰] [🗺️] [🎣]  │  right edge, y ~40%/58%/76%
+│         MarketPanel / RegionChart / │  sheets slide in from the right
+│         GearBar (with LV badge)     │
 │                                     │
 │      CatchCard (transient, modal)   │  centre at 40% height, tap-dismiss
+│         + xp line, level-up banner  │
 │                                     │
 │  (bottom edge left free for the     │
 │   casting controls, owned elsewhere)│
@@ -45,6 +48,16 @@ a full-screen transparent root, and one `UIScale` (`Ui.autoScale`) clamped to
 Only one sheet can be open at a time. They coordinate through a single
 PlayerGui attribute (`SlackWaterOpenPanel`) set in `Ui.makeSheet` — no
 cross-script references, so either panel file can change independently.
+
+## Progression on the wire
+
+GearBar listens to two remotes that are **not yet in Types.luau** (it is owned
+by a separate change): `GearRequest` (client → server, `{ gearId: string }`)
+and `ProfileSync` (server → client, this player only). Until they are folded
+into the contract, the names are mirrored from `src/Server/Remotes.server.luau`
+— keep the two in step. CastResult also grows `level`, `xpGained`,
+`unlockedGear` (id list) and `currentGearId` fields; CatchCard renders them
+when present, so older payloads still lay out.
 
 ## How the client knows "what time is it"
 
@@ -97,14 +110,27 @@ rs.Remotes.Notify:FireClient(plr, {
 	kind = "run", text = "Chinook are running at North Midchannel.",
 	speciesId = "chinook",
 })
+rs.Remotes.ProfileSync:FireClient(plr, {
+	level = 5, levelInto = 120, levelNeeded = 906, fraction = 0.13,
+	xp = 402, currentGearId = "handline", ownedGear = { "handline" },
+})
 ```
 
 Expect: a gold-bordered CatchCard (run + rare banners, contested warning,
 depleted banner, ground bar at 22% with a pale before-tick), a gold 🐟 toast,
-and the HUD total +880 on the next card.
+and the HUD total +880 on the next card. The ProfileSync fires the 🎣 badge to
+`LV 5` and fills the GearBar sheet (one held row, the rest showing their level
+gates). A CastResult can also carry `xpGained`/`level`/`unlockedGear` to see
+the card's xp line and level-up banner — e.g. add `xpGained = 37` to the
+payload above.
 
 ## Known gaps
 
+- **Buying gear is not wired.** `Progression.buy` exists and validates level +
+  funds, but the server has no wallet/money store to deduct from, so GearBar
+  only ever *equips* gear the profile already owns. Locked rows honestly show
+  "reached at level N · price X" with no buy button. Wiring the buy needs a
+  funds owner first (see `src/Server/README.md`).
 - **Default Roblox chrome** (chat top-left, player list top-right) can overlap
   the HUD cluster until the game disables it with
   `StarterGui:SetCoreGuiEnabled`; that call belongs to game bootstrap, not to
