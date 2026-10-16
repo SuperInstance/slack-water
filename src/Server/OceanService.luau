@@ -144,6 +144,18 @@ function Service.start(): Service?
 		backendOnline = false,
 		everSynced = false,
 		reconciler = Reconcile.new(),
+
+		-- A BindableEvent, fired on the SERVER when a region is admitted.
+		--
+		-- This exists because Main.server used to learn about new grounds by
+		-- connecting to `remotes.RegionDiscovered`. That can never work: a
+		-- RemoteEvent's OnServerEvent fires when a CLIENT calls FireServer. The
+		-- server calling FireAllClients on itself does not trigger it. So the
+		-- world silently never rebuilt -- the ocean grew and the map did not.
+		--
+		-- Broadcasting to clients and notifying server-side code are two
+		-- different jobs and need two different channels.
+		regionAdded = Instance.new("BindableEvent"),
 	}
 
 	-- Refresh prices from the starting ocean so day one is coherent.
@@ -521,6 +533,7 @@ function Service.composeNewBanks(svc: Service): ()
 		if report.ok and report.bank then
 			OceanSim.addRegion(svc.ocean, BankSpec.toRegion(report.bank))
 			admitted += 1
+			svc.regionAdded:Fire()
 			svc.remotes[Types.RegionDiscovered]:FireAllClients({
 				id = report.bank.id,
 				name = report.bank.name,
@@ -555,6 +568,7 @@ function Service.fillWithProceduralBanks(svc: Service): ()
 	for i = nextIndex, nextIndex + Config.BANKS_PER_ROUND - 1 do
 		local region = Regions.generateOne(svc.seed, i)
 		OceanSim.addRegion(svc.ocean, region)
+		svc.regionAdded:Fire()
 		svc.remotes[Types.RegionDiscovered]:FireAllClients({
 			id = region.id,
 			name = region.name,

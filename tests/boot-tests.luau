@@ -649,6 +649,256 @@ suite("cast — one full round trip through the server", function()
 end)
 
 --=============================================================================
+-- Harness fidelity — the stub itself is under test here.
+--
+-- Every rule in this suite exists because its absence once shipped a
+-- showstopper: a stub that accepts whatever the code does is worse than no
+-- stub, because it manufactures confidence. If one of these tests fails, the
+-- HARNESS has regressed toward rubber-stamping — fix the stub, not the test.
+--=============================================================================
+
+--- Assert that fn raises, and that the error mentions needle.
+local function assertRaises(needle: string, fn: () -> any, msg: string?)
+	local ok, err = pcall(fn)
+	if ok then
+		error((msg or "expected an error") .. " — but the call succeeded", 2)
+	end
+	local text = tostring(err)
+	if string.find(text, needle, 1, true) == nil then
+		error((msg or "expected an error mentioning") .. " " .. needle .. ", got: " .. text, 2)
+	end
+end
+
+suite("harness fidelity — removed and nonexistent members raise", function()
+	test("RemoteEvent has no .Event (removed; OnServerEvent/OnClientEvent only)", function()
+		local remote = roblox.Instance.new("RemoteEvent")
+		assertRaises("Event is not a valid member of RemoteEvent", function()
+			return remote.Event
+		end, "reading RemoteEvent.Event must raise in Studio")
+		assertRaises("Event is not a valid member of RemoteEvent", function()
+			return remote.Event:Connect(function() end)
+		end, "connecting RemoteEvent.Event must raise, not return nil-and-index")
+	end)
+
+	test("Model has no SetPrimaryPart/GetPrimaryPart (PrimaryPart is a property)", function()
+		local model = roblox.Instance.new("Model")
+		local part = roblox.Instance.new("Part")
+		assertRaises("SetPrimaryPart is not a valid member of Model", function()
+			return model:SetPrimaryPart(part)
+		end, "the removed method form must raise")
+		assertRaises("GetPrimaryPart is not a valid member of Model", function()
+			return model:GetPrimaryPart()
+		end, "the removed method form must raise")
+		model.PrimaryPart = part
+		assertEq(model.PrimaryPart, part, "the property form is the real API and must work")
+	end)
+
+	test("RemoteFunction has no OnServerEvent (it is a RemoteEvent member)", function()
+		local fn = roblox.Instance.new("RemoteFunction")
+		assertRaises("OnServerEvent is not a valid member of RemoteFunction", function()
+			return fn.OnServerEvent
+		end, "RemoteFunction carries OnServerInvoke/OnClientInvoke, not signals")
+	end)
+
+	test("Lighting.Technology is Script Security and refuses writes", function()
+		local lighting: any = roblox.services.Lighting
+		assertRaises("The current thread cannot write 'Technology' (lacking capability)", function()
+			lighting.Technology = roblox.Enum.Technology.Future
+		end, "Studio denies this write and so must the harness")
+	end)
+
+	test("BindableEvent fires its own .Event synchronously (unlike RemoteEvent)", function()
+		-- The asymmetry that matters for server-side listeners: a RemoteEvent's
+		-- server connections never see its outgoing fires; a BindableEvent's
+		-- single .Event signal IS fired by its own :Fire(). The old stub hid
+		-- this by firing a fake RemoteEvent .Event server-side.
+		local be = roblox.Instance.new("BindableEvent")
+		local got: { any } = {}
+		be.Event:Connect(function(a, b)
+			table.insert(got, a)
+			table.insert(got, b)
+		end)
+		be:Fire(1, "two")
+		assertEq(#got, 2, "BindableEvent:Fire must deliver synchronously")
+		assertEq(got[2], "two", "payload round-trips")
+	end)
+end)
+
+suite("harness fidelity — members are per-class and type-checked", function()
+	test("a Folder has no CFrame; a Part has no Text", function()
+		local folder = roblox.Instance.new("Folder")
+		assertRaises("CFrame is not a valid member of Folder", function()
+			folder.CFrame = roblox.CFrame.new(0, 0, 0)
+		end)
+		local part = roblox.Instance.new("Part")
+		assertRaises("Text is not a valid member of Part", function()
+			part.Text = "nope"
+		end)
+	end)
+
+	test("reading a property the class does not have raises, not nil", function()
+		local part = roblox.Instance.new("Part")
+		assertRaises("Flavor is not a valid member of Part", function()
+			return part.Flavor
+		end)
+	end)
+
+	test("property writes are type-checked", function()
+		local part = roblox.Instance.new("Part")
+		assertRaises("unable to assign property Anchored. boolean expected, got number", function()
+			part.Anchored = 5
+		end)
+		assertRaises(
+			"unable to assign property Transparency. number expected, got string",
+			function()
+				part.Transparency = "clear"
+			end
+		)
+		assertRaises(
+			"unable to assign property Material. Enum.Material expected, got number",
+			function()
+				part.Material = 42
+			end
+		)
+		-- The right types still work.
+		part.Anchored = true
+		part.Material = roblox.Enum.Material.WoodPlanks
+		assertEq(part.Anchored, true, "boolean write")
+	end)
+
+	test("GetPivot/PivotTo exist on PVInstances only", function()
+		local folder = roblox.Instance.new("Folder")
+		assertRaises("GetPivot is not a valid member of Folder", function()
+			return folder:GetPivot()
+		end)
+		assertRaises("PivotTo is not a valid member of Folder", function()
+			folder:PivotTo(roblox.CFrame.new(0, 0, 0))
+		end)
+	end)
+
+	test("a Part pivots via its own CFrame (the spawn-rider mechanic)", function()
+		local spawn = roblox.Instance.new("SpawnLocation")
+		spawn.CFrame = roblox.CFrame.new(0, 5, 0)
+		assertEq(spawn:GetPivot().Y, 5, "a part's pivot defaults to its CFrame")
+		spawn:PivotTo(roblox.CFrame.new(0, 6.25, 0))
+		assertEq(spawn.CFrame.Y, 6.25, "PivotTo moves a part that has no children")
+	end)
+
+	test("Instance.new rejects unknown and abstract classes", function()
+		assertRaises("not a class this harness knows", function()
+			return roblox.Instance.new("Spawnlocaton")
+		end)
+		assertRaises("abstract base class", function()
+			return roblox.Instance.new("BasePart")
+		end)
+	end)
+
+	test("a destroyed instance's Parent is locked", function()
+		local folder = roblox.Instance.new("Folder")
+		local part = roblox.Instance.new("Part")
+		part.Parent = folder
+		part:Destroy()
+		assertRaises("is locked", function()
+			part.Parent = folder
+		end)
+	end)
+
+	test("Position derives from the CFrame", function()
+		local part = roblox.Instance.new("Part")
+		part.CFrame = roblox.CFrame.new(1, 2, 3)
+		assertEq(part.Position.Z, 3, "Position read")
+		part.Position = roblox.Vector3.new(9, 9, 9)
+		assertEq(part.CFrame.X, 9, "Position write translates the CFrame")
+	end)
+
+	test("typeof reports Roblox type names", function()
+		local part = roblox.Instance.new("Part")
+		assertEq(roblox.typeof(part), "Instance", "instances")
+		assertEq(roblox.typeof(roblox.Vector3.new(1, 1, 1)), "Vector3", "Vector3")
+		assertEq(roblox.typeof(roblox.Enum.Material.Water), "EnumItem", "EnumItem")
+		assertEq(roblox.typeof("x"), "string", "passthrough")
+	end)
+end)
+
+suite("harness fidelity — the Runner resolves what Studio resolves, and nothing more", function()
+	test("dot-access to a missing child raises (showstopper #4's root cause)", function()
+		-- The historical bug: Chart.luau asked Shared.Ocean for Config, which
+		-- lives in Shared/. The CLI returns nil for a missing table key, so the
+		-- require fell through to a string path and every test passed while
+		-- Studio threw "Config is not a valid member of Folder". Here a module
+		-- that dot-requires a missing sibling must fail to load, loudly.
+		local probeWorld = Roblox.new()
+		local probeRunner = Runner.new(
+			{ ["src/Server/Probe.luau"] = "return require(script.Parent.MissingSibling)" },
+			probeWorld
+		)
+		local ok, err = pcall(function()
+			return probeRunner:load("src/Server/Probe.luau")
+		end)
+		assertTrue(not ok, "the probe module must not load")
+		assertTrue(
+			string.find(tostring(err), "is not a valid member of", 1, true) ~= nil,
+			"expected a not-a-valid-member error, got: " .. tostring(err)
+		)
+	end)
+
+	test("an unresolvable string require raises", function()
+		local probeWorld = Roblox.new()
+		local probeRunner =
+			Runner.new({ ["src/Server/Probe.luau"] = 'return require("./Nope")' }, probeWorld)
+		local ok, err = pcall(function()
+			return probeRunner:load("src/Server/Probe.luau")
+		end)
+		assertTrue(not ok, "the probe module must not load")
+		assertTrue(
+			string.find(tostring(err), "cannot resolve", 1, true) ~= nil,
+			"expected a cannot-resolve error, got: " .. tostring(err)
+		)
+	end)
+
+	test("HttpService:RequestAsync has the real single-table signature", function()
+		local http: any = roblox.services.HttpService
+		assertRaises(
+			"invalid argument #1 to 'RequestAsync' (table expected, got string)",
+			function()
+				return http:RequestAsync("https://example.invalid", { Method = "GET" })
+			end,
+			"the (url, options) form is not the real API"
+		)
+		assertRaises("options.Url must be a string", function()
+			return http:RequestAsync({ Method = "GET" })
+		end, "an options table without Url is rejected like Studio rejects it")
+		assertRaises("no network in the boot smoke test", function()
+			return http:RequestAsync({ Url = "https://example.invalid" })
+		end)
+	end)
+
+	test("GetPropertyChangedSignal fires only when the value changes", function()
+		local part = roblox.Instance.new("Part")
+		local fired = 0
+		part:GetPropertyChangedSignal("Transparency"):Connect(function()
+			fired += 1
+		end)
+		part.Transparency = 0.5
+		part.Transparency = 0.5
+		part.Transparency = 0.6
+		assertEq(fired, 2, "same-value writes must not re-fire (or fixed updaters loop)")
+	end)
+
+	test("member access shadows children, as in Studio", function()
+		local folder = roblox.Instance.new("Folder")
+		local child = roblox.Instance.new("Folder")
+		child.Name = "GetChildren"
+		child.Parent = folder
+		assertEq(
+			type(folder.GetChildren),
+			"function",
+			"the method must win over a child literally named GetChildren"
+		)
+	end)
+end)
+
+--=============================================================================
 -- Summary
 --=============================================================================
 

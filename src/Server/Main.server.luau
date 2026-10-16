@@ -76,18 +76,22 @@ function Main.start(): ()
 
 	-- 4. New regions arrive over time; each one gets built when it is admitted.
 	--
-	--    `remote.Event:Connect` is the correct Roblox idiom. The previous comment
-	--    here claimed RemoteEvent has no `.Event` property and that it was "a
-	--    RBXScriptSignal on RemoteFunction" — that is backwards, and it is why
-	--    this line had drifted into `remote:Connect(...)`, which is not a method
-	--    RemoteEvent has at all. It is RemoteFunction that lacks `.Event` and
-	--    uses `.OnServerEvent`/`.OnClientEvent` instead.
+	--    A RemoteEvent has no `.Event` property in current Roblox -- it was
+	--    removed. The server listens on `OnServerEvent`; the client listens on
+	--    `OnClientEvent`. `remote:Connect(...)` and `remote.Event:Connect(...)`
+	--    are both wrong, for different reasons.
 	--
-	--    Both mistakes were silent: Main wraps every stage in pcall and only
-	--    prints, so the listener simply never existed and AI-composed grounds
-	--    were broadcast to clients but never built into the world.
+	--    This line has now been wrong in THREE different ways across the life
+	--    of the project, and each version was "fixed" against a stub rather
+	--    than against real Roblox. The harness had a hand-written RemoteEvent
+	--    that grew an `.Event` field to satisfy the broken code, which made the
+	--    30/30 green run actively misleading. The stub now models modern
+	--    Roblox exactly.
+	--
+	--    Main wraps every stage in pcall and only prints, so every version of
+	--    this bug was silent: the listener simply never existed.
 	stage("region listener", function()
-		svc.remotes[Types.RegionDiscovered].Event:Connect(function()
+		svc.regionAdded.Event:Connect(function()
 			task.defer(function()
 				WorldGen.build(svc.ocean)
 			end)

@@ -49,12 +49,29 @@ function Environment.apply(): ()
 	Lighting.FogEnd = TUNING.fogEnd
 	Lighting.ClockTime = TUNING.timeOfDay
 	Lighting.GlobalShadows = true
-	Lighting.Technology = Enum.Technology.Future
+	-- Lighting.Technology is a Script Security property and CANNOT be written
+	-- from a normal play session -- Studio denies it outright:
+	--   "The current thread cannot write 'Technology' (lacking capability)"
+	-- which threw Environment.apply() and took the whole boot with it, because
+	-- Main's pcall stage reported the failure and Studio only printed it.
+	-- Future shading is the Studio default anyway, so this is best-effort.
+	local techOk = pcall(function()
+		Lighting.Technology = Enum.Technology.Future
+	end)
+	if not techOk then
+		print("[slack-water] environment: leaving Lighting.Technology at the Studio default")
+	end
 
-	Lighting.PropertyChangedSignal:Connect(function(property)
-		if property == "ClockTime" then
-			Lighting.ClockTime = TUNING.timeOfDay
-		end
+	-- There is no `Lighting.PropertyChangedSignal` property. Every Instance
+	-- exposes `GetPropertyChangedSignal(propertyName)` as a METHOD returning a
+	-- signal for that one property. Reading the property threw
+	--   "PropertyChangedSignal is not a valid member of Lighting"
+	-- which killed Environment.apply() and therefore the whole boot stage.
+	--
+	-- The harness stub used to carry a fake PropertyChangedSignal property,
+	-- which hid this. Found by the fidelity audit, not by a failing test.
+	Lighting:GetPropertyChangedSignal("ClockTime"):Connect(function()
+		Lighting.ClockTime = TUNING.timeOfDay
 	end)
 
 	local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")

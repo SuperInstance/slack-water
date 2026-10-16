@@ -129,9 +129,11 @@ function Runner:makeEnv(path: string): any
 			if type(ref) == "table" and ref.__path ~= nil then
 				return runner:load(ref.__path)
 			elseif type(ref) == "string" then
-				-- Studio-style relative require ("./Sibling", "../Parent/X"),
-				-- which the dual-target idiom falls back to when a tree lookup
-				-- misses (e.g. Chart.luau's Config lookup from inside Ocean/).
+				-- Studio-style relative require ("./Sibling", "../Parent/X").
+				-- This is real current Roblox behaviour, not a test-only
+				-- convenience: require-by-string shipped in January 2025 and
+				-- src/Shared uses it throughout. It resolves against the
+				-- requiring module's own location, as Studio resolves it.
 				return runner:load(runner:resolveRelative(path, ref))
 			end
 			error(
@@ -149,6 +151,9 @@ function Runner:makeEnv(path: string): any
 		UDim2 = roblox.UDim2,
 		Enum = roblox.Enum,
 		task = roblox.task,
+		-- Roblox's typeof, so `typeof(x) == "Instance"` behaves as in Studio
+		-- (the bare CLI typeof would say "table").
+		typeof = roblox.typeof,
 		print = tee("print", print),
 		warn = tee("warn", warn),
 	}, { __index = getfenv(1) })

@@ -1,22 +1,49 @@
 --!nonstrict
 --[[
-	Roblox.luau — a fake Roblox engine for the server boot smoke test.
+	Roblox.luau — a strict stand-in Roblox engine for the server boot smoke test.
 
 	WHAT THIS IS
-	The smallest stand-in that lets src/Server/** execute outside Studio: a fake
+	The smallest engine that lets src/Server/** execute outside Studio: a fake
 	DataModel (game, workspace, the services the boot path touches), an Instance
 	implementation with a real parent/child tree, the datatypes WorldGen builds
 	geometry with, and a task scheduler that runs deterministically instead of on
 	a wall clock.
 
-	WHAT THIS IS NOT (read this before trusting a green run)
+	STRICTNESS POLICY (read this before trusting a green run)
+	This stub used to accept whatever the code under test happened to do: it grew
+	an `.Event` field on RemoteEvent, accepted `Model:SetPrimaryPart(...)`,
+	allowed writing `Lighting.Technology`, and returned nil for missing children.
+	Each of those hid a shipped showstopper, and each was discovered in Studio,
+	not here. The stub now enforces real member rules instead:
+
+	- Reading or writing a property the instance's class does not have raises
+	  `X is not a valid member of Class "Name"` — including dot-access to a
+	  child that is not there, which in Studio is an error, never nil.
+	- Methods that real Roblox does not have raise the same error
+	  (`SetPrimaryPart`, `GetPrimaryPart`, `RemoteEvent.Event`, ...).
+	- Property writes are type-checked: `part.Anchored = 5` raises
+	  `unable to assign property Anchored. boolean expected, got number`.
+	- Script Security properties (Lighting.Technology) refuse writes with the
+	  Studio capability error.
+	- HttpService:RequestAsync has the real single-options-table signature.
+	- A destroyed instance's Parent is locked, as in Studio.
+
+	The boot suite asserts this strictness itself (the "harness fidelity" suite
+	in tests/boot-tests.luau), so a regression toward rubber-stamping is red,
+	not silent. See docs/HARNESS-FIDELITY.md for the full account: what is
+	modelled exactly, what is approximate on purpose, and what is UNVERIFIED.
+
+	WHAT THIS IS NOT
 	- No physics, no rendering, no streaming. A part that "exists" here is a row
 	  in a table; whether a player would really stand on it is asserted by the
 	  smoke test reading CanCollide/Anchored/CFrame, never simulated.
+	- Unset properties read as nil, not as their Roblox class defaults. This is
+	  deliberate: it is what lets the tests detect "that tuning is dead code".
+	  Code that relies on a default (part.Transparency == 0) sees nil instead.
 	- CFrame tracks position only. Composition adds positions, which is exact
 	  for every expression in this repo (rotations are only ever built with a
 	  zero position, via CFrame.Angles, and multiplied in once on the right). A
-	  rotation-dependent expression would silently get a wrong LookVector.
+	  rotation-dependent expression silently gets a wrong LookVector.
 	- task.wait yields forever and nothing resumes it, so a loop that waits is a
 	  loop that parks. Time advances only when the test fires RunService.Heartbeat
 	  and flushes the task.defer queue itself.
@@ -52,13 +79,29 @@ function Signal.new(name: string): any
 end
 
 function Signal:Connect(fn: any): any
+	if type(fn) ~= "function" then
+		error(
+			string.format("invalid argument #1 to 'Connect' (function expected, got %s)", type(fn)),
+			2
+		)
+	end
 	local entry = { fn = fn, connected = true }
 	table.insert(self._handlers, entry)
-	return {
-		Disconnect = function()
-			entry.connected = false
+	local connection = setmetatable({}, {
+		__index = function(_self: any, k: string)
+			if k == "Connected" then
+				return entry.connected
+			end
+			return nil
 		end,
-	}
+		__newindex = function()
+			error("harness: RBXScriptConnection is read-only (call Disconnect)", 0)
+		end,
+	})
+	rawset(connection, "Disconnect", function()
+		entry.connected = false
+	end)
+	return connection
 end
 
 function Signal:Fire(...: any): ()
@@ -96,12 +139,25 @@ end
 Vector3.__sub = function(a, b)
 	return Vector3.new(a.X - b.X, a.Y - b.Y, a.Z - b.Z)
 end
+Vector3.__mul = function(a, b)
+	if type(a) == "number" then
+		return Vector3.new(a * b.X, a * b.Y, a * b.Z)
+	end
+	if type(b) == "number" then
+		return Vector3.new(a.X * b, a.Y * b, a.Z * b)
+	end
+	error("Vector3 can only be multiplied by a number", 2)
+end
 Vector3.__tostring = function(v)
 	return string.format("%.3f, %.3f, %.3f", v.X, v.Y, v.Z)
 end
 
 local CFrame = {}
 CFrame.__index = CFrame
+
+local function isVector3(v: any): boolean
+	return type(v) == "table" and getmetatable(v) == Vector3
+end
 
 function CFrame.new(x: number?, y: number?, z: number?): any
 	local cf = setmetatable({ X = x or 0, Y = y or 0, Z = z or 0 }, CFrame)
@@ -127,6 +183,16 @@ function CFrame.lookAt(from: any, to: any): any
 end
 
 CFrame.__mul = function(a, b)
+	if getmetatable(b) ~= CFrame then
+		error("CFrame can only be multiplied by a CFrame (got " .. type(b) .. ")", 2)
+	end
+	return CFrame.new(a.X + b.X, a.Y + b.Y, a.Z + b.Z)
+end
+-- Real Roblox: CFrame + Vector3 translates the CFrame. Anything else errors.
+CFrame.__add = function(a, b)
+	if not isVector3(b) then
+		error("CFrame can only be added to a Vector3", 2)
+	end
 	return CFrame.new(a.X + b.X, a.Y + b.Y, a.Z + b.Z)
 end
 CFrame.__tostring = function(cf)
@@ -251,16 +317,192 @@ function Task.flush(): ()
 end
 
 --=============================================================================
--- Instances
+-- The class registry
+--
+-- Every Instance is a member of exactly one registered class, and every
+-- property/method/signal it may have is declared here. Anything not declared
+-- raises `X is not a valid member of Class "Name"`, which is what Studio does.
+-- If the boot path legitimately needs a real Roblox member this table lacks,
+-- add it — after checking the real API, not the code under test.
 --=============================================================================
 
-local InstanceMethods = {}
+local CLASS_PARENTS: { [string]: string } = {
+	-- geometry
+	Part = "BasePart",
+	SpawnLocation = "Part",
+	WedgePart = "BasePart",
+	MeshPart = "BasePart",
+	Terrain = "BasePart",
+	BasePart = "PVInstance",
+	Model = "PVInstance",
+	Workspace = "Model",
+	PVInstance = "Instance",
+	-- containers and scripts
+	Folder = "Instance",
+	ModuleScript = "Instance",
+	Script = "Instance",
+	LocalScript = "Instance",
+	-- networking
+	RemoteEvent = "Instance",
+	RemoteFunction = "Instance",
+	-- gui (real hierarchy is deeper; Instance-parented here is equivalent for
+	-- every member the boot path touches)
+	BillboardGui = "Instance",
+	TextLabel = "Instance",
+	-- lighting effects
+	Atmosphere = "Instance",
+	Clouds = "Instance",
+	-- services
+	Lighting = "Instance",
+	Players = "Instance",
+	ReplicatedStorage = "Instance",
+	ServerScriptService = "Instance",
+	RunService = "Instance",
+	HttpService = "Instance",
+	DataStoreService = "Instance",
+	-- actors
+	Player = "Instance",
+	Humanoid = "Instance",
+	-- server-side signalling and value objects: not used by the boot path
+	-- today, but real current API and the natural material for fixing the
+	-- region-listener bug, so the harness must not falsely reject them
+	BindableEvent = "Instance",
+	BindableFunction = "Instance",
+	IntValue = "Instance",
+	NumberValue = "Instance",
+	StringValue = "Instance",
+	BoolValue = "Instance",
+	ObjectValue = "Instance",
+}
+
+-- Classes Instance.new will actually construct. Abstract chain entries
+-- (BasePart, PVInstance, Instance) are refused, as Studio refuses them.
+local CREATABLE_CLASSES: { [string]: boolean } = {
+	Part = true,
+	SpawnLocation = true,
+	WedgePart = true,
+	MeshPart = true,
+	Terrain = true,
+	Model = true,
+	Workspace = true,
+	Folder = true,
+	ModuleScript = true,
+	Script = true,
+	LocalScript = true,
+	RemoteEvent = true,
+	RemoteFunction = true,
+	BillboardGui = true,
+	TextLabel = true,
+	Atmosphere = true,
+	Clouds = true,
+	Lighting = true,
+	Players = true,
+	ReplicatedStorage = true,
+	ServerScriptService = true,
+	RunService = true,
+	HttpService = true,
+	DataStoreService = true,
+	Player = true,
+	Humanoid = true,
+	BindableEvent = true,
+	BindableFunction = true,
+	IntValue = true,
+	NumberValue = true,
+	StringValue = true,
+	BoolValue = true,
+	ObjectValue = true,
+}
+
+local function inheritsClass(className: string, ancestor: string): boolean
+	local cls: string? = className
+	while cls do
+		if cls == ancestor then
+			return true
+		end
+		cls = CLASS_PARENTS[cls]
+	end
+	return false
+end
+
+local function isInstance(v: any): boolean
+	return type(v) == "table" and rawget(v, "__class") ~= nil
+end
+
+--- The name Roblox would print for a value in a property type error.
+local function describeValue(value: any): string
+	local t = type(value)
+	if t ~= "table" then
+		return t
+	end
+	if isInstance(value) then
+		return tostring(value.__class)
+	end
+	local mt = getmetatable(value)
+	if mt == Vector3 or mt == CFrame or mt == Color3 or mt == UDim2 then
+		local names =
+			{ [Vector3] = "Vector3", [CFrame] = "CFrame", [Color3] = "Color3", [UDim2] = "UDim2" }
+		return names[mt]
+	elseif type(value.EnumType) == "string" then
+		return "EnumItem"
+	end
+	return "table"
+end
+
+local function displayExpected(expected: string): string
+	if string.sub(expected, 1, 5) == "Enum:" then
+		return "Enum." .. string.sub(expected, 6)
+	end
+	if string.sub(expected, -1) == "?" then
+		return string.sub(expected, 1, -2)
+	end
+	return expected
+end
+
+local function valueMatches(expected: string, value: any): boolean
+	if expected == "string" or expected == "number" or expected == "boolean" then
+		return type(value) == expected
+	elseif
+		expected == "Vector3"
+		or expected == "CFrame"
+		or expected == "Color3"
+		or expected == "UDim2"
+	then
+		local mts: { [string]: any } = {
+			Vector3 = Vector3,
+			CFrame = CFrame,
+			Color3 = Color3,
+			UDim2 = UDim2,
+		}
+		return type(value) == "table" and getmetatable(value) == mts[expected]
+	elseif string.sub(expected, 1, 5) == "Enum:" then
+		local enumType = string.sub(expected, 6)
+		return type(value) == "table"
+			and type(value.EnumType) == "string"
+			and value.EnumType == enumType
+	elseif expected == "Instance?" then
+		return value == nil or isInstance(value)
+	elseif expected == "Model?" then
+		return value == nil or (isInstance(value) and inheritsClass(value.__class, "Model"))
+	elseif expected == "BasePart?" then
+		return value == nil or (isInstance(value) and inheritsClass(value.__class, "BasePart"))
+	elseif expected == "function?" then
+		return value == nil or type(value) == "function"
+	elseif expected == "position" then
+		return isVector3(value)
+	end
+	error("harness: unknown property type " .. expected, 0)
+end
+
+--=============================================================================
+-- Instance methods (declared before the registry that names them)
+--=============================================================================
 
 local BASE_PART_CLASSES = {
 	Part = true,
 	SpawnLocation = true,
 	WedgePart = true,
 	MeshPart = true,
+	Terrain = true,
 }
 
 local function collectDescendants(node: any, out: { any })
@@ -274,16 +516,36 @@ local function instancePath(inst: any): string
 	local parts = {}
 	local node = inst
 	while node do
-		table.insert(parts, 1, tostring(node.Name))
-		node = node.Parent
+		table.insert(parts, 1, tostring(node.__values.Name))
+		node = rawget(node, "__parent")
 	end
 	return table.concat(parts, ".")
 end
 
-function InstanceMethods:FindFirstChild(name: string): any
+local function notAValidMember(key: string, inst: any): string
+	return string.format(
+		'%s is not a valid member of %s "%s"',
+		tostring(key),
+		tostring(inst.__class),
+		tostring(inst.__values.Name)
+	)
+end
+
+local InstanceMethods = {}
+
+function InstanceMethods:FindFirstChild(name: string, recursive: boolean?): any
 	for _, child in self.__children do
-		if child.Name == name then
+		if child.__values.Name == name then
 			return child
+		end
+	end
+	if recursive then
+		local descendants = {}
+		collectDescendants(self, descendants)
+		for _, inst in descendants do
+			if inst.__values.Name == name then
+				return inst
+			end
 		end
 	end
 	return nil
@@ -298,13 +560,40 @@ function InstanceMethods:FindFirstChildOfClass(className: string): any
 	return nil
 end
 
+function InstanceMethods:FindFirstChildWhichIsA(className: string, recursive: boolean?): any
+	for _, child in self.__children do
+		if inheritsClass(child.__class, className) then
+			return child
+		end
+	end
+	if recursive then
+		local descendants = {}
+		collectDescendants(self, descendants)
+		for _, inst in descendants do
+			if inheritsClass(inst.__class, className) then
+				return inst
+			end
+		end
+	end
+	return nil
+end
+
 function InstanceMethods:GetChildren(): { any }
 	return table.clone(self.__children)
+end
+
+function InstanceMethods:GetDescendants(): { any }
+	local out = {}
+	collectDescendants(self, out)
+	return out
 end
 
 function InstanceMethods:WaitForChild(name: string): any
 	local found = self:FindFirstChild(name)
 	if found == nil then
+		-- Real Roblox yields forever (with an "Infinite yield possible" warn).
+		-- A harness that hangs proves nothing, so this is a deliberate
+		-- divergence: a missing child is a loud error, not a parked test.
 		error(
 			string.format(
 				"harness WaitForChild: %q is not a child of %s — the fake DataModel tree is incomplete",
@@ -317,8 +606,17 @@ function InstanceMethods:WaitForChild(name: string): any
 	return found
 end
 
+function InstanceMethods:ClearAllChildren(): ()
+	for _, child in table.clone(self.__children) do
+		child:Destroy()
+	end
+end
+
 function InstanceMethods:Destroy(): ()
-	local parent = self.__parent
+	if rawget(self, "__destroyed") then
+		return
+	end
+	local parent = rawget(self, "__parent")
 	if parent then
 		for i, child in parent.__children do
 			if child == self then
@@ -327,9 +625,18 @@ function InstanceMethods:Destroy(): ()
 			end
 		end
 	end
-	self.__parent = nil
-	rawset(self, "Parent", nil)
-	self.__destroyed = true
+	-- Real Destroy takes the descendants with it.
+	local descendants = {}
+	collectDescendants(self, descendants)
+	rawset(self, "__children", {})
+	rawset(self, "__destroyed", true)
+	rawset(self, "__parent", nil)
+	self.__values.Parent = nil
+	for _, inst in descendants do
+		rawset(inst, "__destroyed", true)
+		rawset(inst, "__parent", nil)
+		inst.__values.Parent = nil
+	end
 end
 
 function InstanceMethods:SetAttribute(key: string, value: any): ()
@@ -341,143 +648,144 @@ function InstanceMethods:GetAttribute(key: string): any
 end
 
 function InstanceMethods:IsA(className: string): boolean
-	if self.__class == className then
-		return true
+	if type(className) ~= "string" then
+		error(
+			string.format("invalid argument #1 to 'IsA' (string expected, got %s)", type(className)),
+			2
+		)
 	end
-	if className == "BasePart" then
-		return BASE_PART_CLASSES[self.__class] == true
+	return inheritsClass(self.__class, className)
+end
+
+function InstanceMethods:GetPropertyChangedSignal(prop: string): any
+	if type(prop) ~= "string" then
+		error(
+			string.format(
+				"invalid argument #1 to 'GetPropertyChangedSignal' (string expected, got %s)",
+				type(prop)
+			),
+			2
+		)
 	end
-	return false
+	local pcs = rawget(self, "__pcs")
+	if pcs == nil then
+		pcs = {}
+		rawset(self, "__pcs", pcs)
+	end
+	local sig = pcs[prop]
+	if sig == nil then
+		sig = Signal.new(self.__class .. "." .. prop .. ".PropertyChanged")
+		pcs[prop] = sig
+	end
+	return sig
 end
 
-function InstanceMethods:SetPrimaryPart(part: any): ()
-	self.__primaryPart = part
-	-- Roblox exposes PrimaryPart as a property; OceanSurface reads it.
-	rawset(self, "PrimaryPart", part)
+--- Internal writer used by the harness's own machinery (PivotTo translating
+--- parts, world building). Same rules as a game-code write, minus nothing.
+local function setPropertyValue(inst: any, key: string, value: any)
+	local old = inst.__values[key]
+	inst.__values[key] = value
+	if old ~= value then
+		local pcs = rawget(inst, "__pcs")
+		if pcs then
+			local sig = pcs[key]
+			if sig then
+				-- Real property-changed callbacks receive no arguments.
+				sig:Fire()
+			end
+		end
+	end
 end
 
-function InstanceMethods:GetPrimaryPart(): any
-	return self.__primaryPart
+-- PVInstance pivots. Real Roblox puts GetPivot/PivotTo on every PVInstance
+-- (models AND parts); a Folder has neither.
+local function translateCFrame(inst: any, dx: number, dy: number, dz: number)
+	local cf = inst.__values.CFrame
+	if cf ~= nil then
+		setPropertyValue(inst, "CFrame", CFrame.new(cf.X + dx, cf.Y + dy, cf.Z + dz))
+	end
 end
 
---- A model's pivot: the stored pivot, else its primary part, else the origin.
---- Rotation is never tracked (see the header), so a pivot is a position.
 function InstanceMethods:GetPivot(): any
-	local stored = self.__pivot
+	local stored = rawget(self, "__pivot")
 	if stored ~= nil then
 		return stored
 	end
-	local pp = self.PrimaryPart
-	if pp ~= nil and pp.CFrame ~= nil then
-		return pp.CFrame
+	if inheritsClass(self.__class, "Model") then
+		local pp = self.__values.PrimaryPart
+		if pp ~= nil and pp.__values.CFrame ~= nil then
+			return pp.__values.CFrame
+		end
+		return CFrame.new(0, 0, 0)
+	end
+	local cf = self.__values.CFrame
+	if cf ~= nil then
+		return cf
 	end
 	return CFrame.new(0, 0, 0)
 end
 
---- Move the whole model by the delta between its current pivot and `target`,
---- translating every part CFrame inside it. OceanSurface uses this to float
---- the boat on the tide.
 function InstanceMethods:PivotTo(target: any): ()
+	if type(target) ~= "table" or getmetatable(target) ~= CFrame then
+		error(
+			string.format(
+				"invalid argument #1 to 'PivotTo' (CFrame expected, got %s)",
+				describeValue(target)
+			),
+			2
+		)
+	end
 	local from = self:GetPivot()
 	local dx, dy, dz = target.X - from.X, target.Y - from.Y, target.Z - from.Z
-	self.__pivot = target
+	rawset(self, "__pivot", target)
 	if dx == 0 and dy == 0 and dz == 0 then
 		return
 	end
-	local descendants = {}
-	collectDescendants(self, descendants)
-	for _, inst in descendants do
-		local cf = inst.CFrame
-		if cf ~= nil and BASE_PART_CLASSES[inst.__class] then
-			inst.CFrame = CFrame.new(cf.X + dx, cf.Y + dy, cf.Z + dz)
+	if inheritsClass(self.__class, "Model") then
+		local descendants = {}
+		collectDescendants(self, descendants)
+		for _, inst in descendants do
+			if BASE_PART_CLASSES[inst.__class] then
+				translateCFrame(inst, dx, dy, dz)
+			end
 		end
+	else
+		translateCFrame(self, dx, dy, dz)
 	end
 end
 
-local InstanceMt
-InstanceMt = {
-	-- Property reads resolve in Roblox order: set properties, then member
-	-- methods, then CHILDREN BY NAME (script.Parent.OceanService and
-	-- Shared.Ocean.OceanSim are both child-via-property reads).
-	__index = function(self: any, key: string)
-		local method = InstanceMethods[key]
-		if method ~= nil then
-			return method
-		end
-		for _, child in self.__children do
-			if child.Name == key then
-				return child
-			end
-		end
-		return nil
-	end,
-	__newindex = function(self: any, key: string, value: any)
-		if key == "Parent" then
-			local old = rawget(self, "__parent")
-			if old ~= value then
-				if old then
-					for i, child in old.__children do
-						if child == self then
-							table.remove(old.__children, i)
-							break
-						end
-					end
-				end
-				if value then
-					table.insert(value.__children, self)
-				end
-				rawset(self, "__parent", value)
-				rawset(self, "Parent", value)
-			end
-		else
-			rawset(self, key, value)
-		end
-	end,
-	__tostring = function(self: any)
-		return self.__class .. ' "' .. tostring(self.Name) .. '"'
-	end,
-}
+-- RemoteEvent behaviour. FireAllClients/FireClient deliver to clients only:
+-- in real Roblox the server's own OnServerEvent connections do NOT fire from
+-- its own outgoing fires, and this harness models exactly that (a past version
+-- fired a fake `.Event` here, which hid the region-listener bug for weeks).
+--
+-- sentToAll/sentToPlayers are harness TELEMETRY, not Roblox members: the
+-- outgoing-fire log the boot suite asserts on. They are read-only from Luau
+-- and documented as an approximation in docs/HARNESS-FIDELITY.md.
+local function remoteFireAllClients(self: any, ...: any): ()
+	table.insert(self.__values.sentToAll, { ... })
+end
 
-local function makeInstance(className: string): any
-	local inst = setmetatable({}, InstanceMt)
-	inst.__class = className
-	inst.__children = {}
-	inst.__attributes = {}
-	inst.Name = className
-	inst.ClassName = className
-
-	if className == "RemoteEvent" or className == "RemoteFunction" then
-		inst.OnServerEvent = Signal.new(className .. ".OnServerEvent")
-		inst.OnClientEvent = Signal.new(className .. ".OnClientEvent")
-		inst.sentToAll = {}
-		inst.sentToPlayers = {}
-		-- RemoteEvent exposes `.Event` (an RBXScriptSignal); RemoteFunction does
-		-- NOT — it uses `.OnServerEvent`/`.OnClientEvent` instead. Modelling that
-		-- difference matters, because `remote.Event:Connect` vs `remote:Connect`
-		-- is exactly the distinction Main.server.luau got wrong.
-		if className == "RemoteEvent" then
-			inst.Event = Signal.new(className .. ".Event")
-		end
-		function inst:FireAllClients(...: any)
-			table.insert(self.sentToAll, { ... })
-			-- Real Roblox fires server-side `.Event` connections from the
-			-- server's own FireAllClients/FireClient, not just OnClientEvent on
-			-- the far end. Main.server.luau's region listener depends on that
-			-- to rebuild the world, so the harness has to model it or the test
-			-- would be asserting behaviour Roblox does not have.
-			if self.Event then
-				self.Event:Fire(...)
-			end
-		end
-		function inst:FireClient(player: any, ...: any)
-			table.insert(self.sentToPlayers, { player = player, args = { ... } })
-			if self.Event then
-				self.Event:Fire(...)
-			end
-		end
+local function remoteFireClient(self: any, player: any, ...: any): ()
+	if not (isInstance(player) and player.__class == "Player") then
+		error(
+			string.format(
+				"invalid argument #1 to 'FireClient' (Player expected, got %s)",
+				describeValue(player)
+			),
+			2
+		)
 	end
+	table.insert(self.__values.sentToPlayers, { player = player, args = { ... } })
+end
 
-	return inst
+local function clientOnlyCall(name: string): ()
+	error(
+		"harness: RemoteEvent:"
+			.. name
+			.. " is a client-only call and cannot be modelled server-side",
+		2
+	)
 end
 
 --=============================================================================
@@ -533,6 +841,297 @@ local function jsonEncode(value: any): string
 	return "{" .. table.concat(parts, ",") .. "}"
 end
 
+--- HttpService.JSONEncode as a spec'd method (self is the service instance).
+local function httpJSONEncode(_self: any, value: any): string
+	return jsonEncode(value)
+end
+
+--=============================================================================
+-- The registry itself
+--=============================================================================
+
+local function mergeMethods(base: { [string]: any }, extra: { [string]: any }): { [string]: any }
+	local merged = table.clone(base)
+	for k, v in extra do
+		merged[k] = v
+	end
+	return merged
+end
+
+local CLASS_SPECS: { [string]: any } = {}
+local MEMBER_CACHE: { [string]: { [string]: any } } = {}
+local SIGNALS_CACHE: { [string]: { [string]: boolean } } = {}
+
+-- spec fields:
+--   props         [name] = type string          — writable, type-checked
+--   readOnly      [name] = true                 — readable, not assignable
+--   scriptSecurity [name] = true                — readable, write -> capability error
+--   signals       [name] = true                 — readable signal, Connect-only
+--   callbacks     [name] = type string          — writable callback ("function?")
+--   methods       [name] = fn                   — callable members
+local BASE_PROPS: { [string]: string } = {
+	Name = "string",
+	Parent = "Instance?",
+}
+
+local function classSignals(className: string): { [string]: boolean }
+	local cached = SIGNALS_CACHE[className]
+	if cached ~= nil then
+		return cached
+	end
+	local merged: { [string]: boolean } = {}
+	local cls: string? = className
+	while cls do
+		local spec = CLASS_SPECS[cls]
+		if spec and spec.signals then
+			for name in spec.signals do
+				merged[name] = true
+			end
+		end
+		cls = CLASS_PARENTS[cls]
+	end
+	SIGNALS_CACHE[className] = merged
+	return merged
+end
+
+--- Resolve a member key against a class and its ancestors. Returns a table
+--- with kind + type, or nil when no class in the chain declares the key.
+--- Methods win over properties (names never collide in the real API), and
+--- every member wins over children — `folder.FindFirstChild` is the method
+--- even if a child is named "FindFirstChild", as in Studio.
+local function memberInfo(className: string, key: string): any?
+	local byKey = MEMBER_CACHE[className]
+	if byKey == nil then
+		byKey = {}
+		MEMBER_CACHE[className] = byKey
+	end
+	local hit = byKey[key]
+	if hit ~= nil then
+		return hit
+	end
+	local cls: string? = className
+	while cls do
+		local spec = CLASS_SPECS[cls]
+		if spec then
+			if spec.methods and spec.methods[key] ~= nil then
+				hit = { kind = "method", value = spec.methods[key] }
+				break
+			end
+			if spec.props and spec.props[key] ~= nil then
+				hit = { kind = "prop", typeName = spec.props[key] }
+				break
+			end
+			if spec.callbacks and spec.callbacks[key] ~= nil then
+				hit = { kind = "callback", typeName = spec.callbacks[key] }
+				break
+			end
+			if spec.readOnly and spec.readOnly[key] then
+				hit = { kind = "readOnly" }
+				break
+			end
+			if spec.scriptSecurity and spec.scriptSecurity[key] then
+				hit = { kind = "scriptSecurity" }
+				break
+			end
+			if spec.signals and spec.signals[key] then
+				hit = { kind = "signal" }
+				break
+			end
+		end
+		cls = CLASS_PARENTS[cls]
+	end
+	byKey[key] = hit or false
+	return hit
+end
+
+local SCRIPT_SECURITY_WRITE = "The current thread cannot write 'Technology' (lacking capability)"
+
+--=============================================================================
+-- The Instance metatable
+--=============================================================================
+
+local InstanceMt
+InstanceMt = {
+	-- Property reads resolve in Roblox order: class members (methods, then
+	-- properties/signals), then CHILDREN BY NAME (script.Parent.OceanService
+	-- and Shared.Ocean.OceanSim are both child-via-property reads). A key that
+	-- is neither a member nor a child is an ERROR in Studio, not nil — this is
+	-- the rule whose absence once let `Shared.Ocean.Config` (which does not
+	-- exist; Config lives in Shared/) pass every headless test and kill the
+	-- whole server boot in Studio.
+	__index = function(self: any, key: string)
+		if type(key) ~= "string" or string.sub(key, 1, 2) == "__" then
+			return rawget(self, key)
+		end
+		local m = memberInfo(self.__class, key)
+		if m then
+			if m.kind == "method" then
+				return m.value
+			end
+			if m.typeName == "position" then
+				local cf = self.__values.CFrame
+				if cf == nil then
+					return nil
+				end
+				return Vector3.new(cf.X, cf.Y, cf.Z)
+			end
+			return self.__values[key]
+		end
+		for _, child in self.__children do
+			if child.__values.Name == key then
+				return child
+			end
+		end
+		error(notAValidMember(key, self), 0)
+	end,
+	__newindex = function(self: any, key: string, value: any)
+		if key == "Parent" then
+			if rawget(self, "__destroyed") then
+				error(
+					string.format(
+						'The Parent property of %s "%s" is locked',
+						tostring(self.__class),
+						tostring(self.__values.Name)
+					),
+					0
+				)
+			end
+			if value ~= nil and not isInstance(value) then
+				error(
+					string.format(
+						"unable to assign property Parent. Instance expected, got %s",
+						describeValue(value)
+					),
+					0
+				)
+			end
+			if value ~= nil then
+				local node: any = value
+				while node do
+					if node == self then
+						error(
+							string.format(
+								'harness: cannot parent %s "%s" to itself or its descendant',
+								tostring(self.__class),
+								tostring(self.__values.Name)
+							),
+							0
+						)
+					end
+					node = rawget(node, "__parent")
+				end
+			end
+			local old = rawget(self, "__parent")
+			if old ~= value then
+				if old then
+					for i, child in old.__children do
+						if child == self then
+							table.remove(old.__children, i)
+							break
+						end
+					end
+				end
+				if value then
+					table.insert(value.__children, self)
+				end
+				rawset(self, "__parent", value)
+				self.__values.Parent = value
+			end
+			return
+		end
+		if type(key) ~= "string" or string.sub(key, 1, 2) == "__" then
+			-- "__"-prefixed keys are the harness's own storage channel. Game
+			-- code has no business writing them; the harness has no other way
+			-- to keep internal state off the member-validated surface.
+			rawset(self, key, value)
+			return
+		end
+		local m = memberInfo(self.__class, key)
+		if not m then
+			error(notAValidMember(key, self), 0)
+		end
+		if m.kind == "method" then
+			error(
+				string.format(
+					'harness: "%s" is a method of %s and cannot be assigned',
+					tostring(key),
+					tostring(self.__class)
+				),
+				0
+			)
+		end
+		if m.kind == "scriptSecurity" then
+			error(SCRIPT_SECURITY_WRITE, 0)
+		end
+		if m.kind == "readOnly" or m.kind == "signal" then
+			local hint = if m.kind == "signal" then " (Connect to the signal instead)" else ""
+			error(
+				string.format(
+					"unable to assign property %s. Property is read only%s",
+					tostring(key),
+					hint
+				),
+				0
+			)
+		end
+		local expected = m.typeName
+		if not valueMatches(expected, value) then
+			error(
+				string.format(
+					"unable to assign property %s. %s expected, got %s",
+					tostring(key),
+					displayExpected(expected),
+					describeValue(value)
+				),
+				0
+			)
+		end
+		if expected == "position" then
+			local cf = CFrame.new(value.X, value.Y, value.Z)
+			setPropertyValue(self, "CFrame", cf)
+			return
+		end
+		setPropertyValue(self, key, value)
+	end,
+	__tostring = function(self: any)
+		return self.__class .. ' "' .. tostring(self.__values.Name) .. '"'
+	end,
+}
+
+local function makeInstance(className: string, parent: any?): any
+	if not CREATABLE_CLASSES[className] then
+		if CLASS_PARENTS[className] ~= nil or className == "Instance" then
+			error("harness Instance.new: " .. className .. " is an abstract base class", 0)
+		end
+		error(
+			'harness Instance.new: "'
+				.. tostring(className)
+				.. '" is not a class this harness knows — if it is a real current Roblox class, teach the registry; if it is not, the code is inventing classes',
+			0
+		)
+	end
+	local inst = setmetatable({}, InstanceMt)
+	rawset(inst, "__class", className)
+	rawset(inst, "__children", {})
+	rawset(inst, "__attributes", {})
+	rawset(inst, "__values", { Name = className, ClassName = className })
+	for signalName in classSignals(className) do
+		inst.__values[signalName] = Signal.new(className .. "." .. signalName)
+	end
+	if className == "RemoteEvent" then
+		inst.__values.sentToAll = {}
+		inst.__values.sentToPlayers = {}
+	end
+	if parent ~= nil then
+		inst.Parent = parent
+	end
+	return inst
+end
+
+--=============================================================================
+-- Service behaviour beyond the member registry
+--=============================================================================
+
 --- Studio without API access: reads are nil, writes "succeed" into nothing.
 local function makeDataStore()
 	return {
@@ -551,6 +1150,352 @@ local function makeDataStore()
 	}
 end
 
+--- typeof as Roblox defines it: fake instances are "Instance", the stub
+--- datatypes report their Roblox names, everything else falls through.
+local function robloxTypeof(v: any): string
+	if type(v) == "table" then
+		if rawget(v, "__class") ~= nil then
+			return "Instance"
+		end
+		local mt = getmetatable(v)
+		if mt == Vector3 then
+			return "Vector3"
+		elseif mt == CFrame then
+			return "CFrame"
+		elseif mt == Color3 then
+			return "Color3"
+		elseif mt == UDim2 then
+			return "UDim2"
+		elseif type(v.EnumType) == "string" then
+			return "EnumItem"
+		end
+	end
+	return type(v)
+end
+
+--=============================================================================
+-- Spec declarations (after every function they name)
+--=============================================================================
+
+local METHODS_BASE: { [string]: any } = {
+	FindFirstChild = InstanceMethods.FindFirstChild,
+	FindFirstChildOfClass = InstanceMethods.FindFirstChildOfClass,
+	FindFirstChildWhichIsA = InstanceMethods.FindFirstChildWhichIsA,
+	GetChildren = InstanceMethods.GetChildren,
+	GetDescendants = InstanceMethods.GetDescendants,
+	WaitForChild = InstanceMethods.WaitForChild,
+	Destroy = InstanceMethods.Destroy,
+	ClearAllChildren = InstanceMethods.ClearAllChildren,
+	SetAttribute = InstanceMethods.SetAttribute,
+	GetAttribute = InstanceMethods.GetAttribute,
+	IsA = InstanceMethods.IsA,
+	GetPropertyChangedSignal = InstanceMethods.GetPropertyChangedSignal,
+}
+
+local METHODS_PV = mergeMethods(METHODS_BASE, {
+	GetPivot = InstanceMethods.GetPivot,
+	PivotTo = InstanceMethods.PivotTo,
+})
+
+local METHODS_REMOTE_EVENT = mergeMethods(METHODS_BASE, {
+	FireAllClients = remoteFireAllClients,
+	FireClient = remoteFireClient,
+	FireServer = function()
+		clientOnlyCall("FireServer")
+	end,
+})
+
+local METHODS_REMOTE_FUNCTION = mergeMethods(METHODS_BASE, {
+	InvokeServer = function()
+		error(
+			"harness: RemoteFunction:InvokeServer is a client-only call and cannot be modelled server-side",
+			2
+		)
+	end,
+	InvokeClient = function()
+		error("harness: RemoteFunction:InvokeClient is not modelled (deprecated surface)", 2)
+	end,
+})
+
+local METHODS_PLAYERS = mergeMethods(METHODS_BASE, {
+	GetPlayers = function(self: any): { any }
+		local list = {}
+		for _, child in self.__children do
+			if child.__class == "Player" then
+				table.insert(list, child)
+			end
+		end
+		return list
+	end,
+})
+
+local METHODS_RUN_SERVICE = mergeMethods(METHODS_BASE, {
+	IsServer = function()
+		return true
+	end,
+	IsClient = function()
+		return false
+	end,
+	IsStudio = function()
+		return false
+	end,
+})
+
+local METHODS_HTTP = mergeMethods(METHODS_BASE, {
+	JSONEncode = httpJSONEncode,
+	JSONDecode = function(_self: any, _text: string): any
+		error(
+			"harness: HttpService:JSONDecode is not stubbed (requests never succeed here, so it is unreachable)",
+			2
+		)
+	end,
+	RequestAsync = function(_self: any, options: any): any
+		-- The real API is HttpService:RequestAsync(options) with ONE table
+		-- carrying Url/Method/Headers/Body. Anything else is a Studio error.
+		if type(options) ~= "table" then
+			error(
+				string.format(
+					"invalid argument #1 to 'RequestAsync' (table expected, got %s)",
+					type(options)
+				),
+				2
+			)
+		end
+		if type(options.Url) ~= "string" then
+			error(
+				"harness: HttpService:RequestAsync — options.Url must be a string (the real API takes ONE options table: Url, Method, Headers, Body)",
+				2
+			)
+		end
+		-- Always fails, pcall'd by the caller (OceanClient). The game must
+		-- degrade to a locally-simulated ocean — that is the property under
+		-- test, so the harness must not "help" by succeeding.
+		error("harness: no network in the boot smoke test", 2)
+	end,
+})
+
+local METHODS_DATASTORE = mergeMethods(METHODS_BASE, {
+	GetDataStore = function(_self: any, name: any)
+		if type(name) ~= "string" then
+			error(
+				string.format(
+					"invalid argument #1 to 'GetDataStore' (string expected, got %s)",
+					type(name)
+				),
+				2
+			)
+		end
+		return makeDataStore()
+	end,
+})
+
+local BASEPART_PROPS: { [string]: string } = {
+	Size = "Vector3",
+	CFrame = "CFrame",
+	Position = "position",
+	Anchored = "boolean",
+	CanCollide = "boolean",
+	CanTouch = "boolean",
+	CanQuery = "boolean",
+	CastShadow = "boolean",
+	Material = "Enum:Material",
+	Color = "Color3",
+	Transparency = "number",
+	Reflectance = "number",
+	TopSurface = "Enum:SurfaceType",
+	BottomSurface = "Enum:SurfaceType",
+}
+
+CLASS_SPECS["Instance"] = {
+	props = BASE_PROPS,
+	readOnly = { ClassName = true },
+	methods = METHODS_BASE,
+}
+
+CLASS_SPECS["PVInstance"] = {
+	methods = METHODS_PV,
+}
+
+CLASS_SPECS["BasePart"] = {
+	props = BASEPART_PROPS,
+	methods = METHODS_PV,
+}
+
+CLASS_SPECS["Part"] = {
+	props = { Shape = "Enum:PartType" },
+	methods = METHODS_PV,
+}
+
+CLASS_SPECS["SpawnLocation"] = {
+	props = { Neutral = "boolean", Duration = "number" },
+	methods = METHODS_PV,
+}
+
+CLASS_SPECS["MeshPart"] = {
+	props = { MeshId = "string" },
+	methods = METHODS_PV,
+}
+
+CLASS_SPECS["Terrain"] = {
+	methods = METHODS_PV,
+}
+
+CLASS_SPECS["Model"] = {
+	props = { PrimaryPart = "BasePart?" },
+	methods = METHODS_PV,
+}
+
+CLASS_SPECS["Workspace"] = {
+	readOnly = { Terrain = true },
+	methods = METHODS_PV,
+}
+
+CLASS_SPECS["Folder"] = {}
+CLASS_SPECS["ModuleScript"] = {}
+CLASS_SPECS["Script"] = {}
+CLASS_SPECS["LocalScript"] = {}
+CLASS_SPECS["Humanoid"] = {}
+
+-- BindableEvent fires its own .Event synchronously from :Fire() — this IS
+-- real Roblox behaviour (unlike RemoteEvent, where the server never observes
+-- its own outgoing fires). That asymmetry is the whole reason a BindableEvent
+-- is the correct tool for the region-discovered listener.
+CLASS_SPECS["BindableEvent"] = {
+	signals = { Event = true },
+	methods = mergeMethods(METHODS_BASE, {
+		Fire = function(self: any, ...: any): ()
+			self.__values.Event:Fire(...)
+		end,
+	}),
+}
+
+CLASS_SPECS["BindableFunction"] = {
+	callbacks = { OnInvoke = "function?" },
+	methods = mergeMethods(METHODS_BASE, {
+		Invoke = function(self: any, ...: any): any
+			local cb = self.__values.OnInvoke
+			if type(cb) ~= "function" then
+				error("harness: BindableFunction:Invoke — OnInvoke is not set", 2)
+			end
+			return cb(...)
+		end,
+	}),
+}
+
+CLASS_SPECS["IntValue"] = {
+	props = { Value = "number" },
+}
+CLASS_SPECS["NumberValue"] = {
+	props = { Value = "number" },
+}
+CLASS_SPECS["StringValue"] = {
+	props = { Value = "string" },
+}
+CLASS_SPECS["BoolValue"] = {
+	props = { Value = "boolean" },
+}
+CLASS_SPECS["ObjectValue"] = {
+	props = { Value = "Instance?" },
+}
+
+CLASS_SPECS["RemoteEvent"] = {
+	signals = { OnServerEvent = true, OnClientEvent = true },
+	-- Harness telemetry (see remoteFireAllClients above): readable so test
+	-- files can assert on what was broadcast, read-only so game code cannot
+	-- forge a log. Not Roblox members; the one deliberate naming compromise.
+	readOnly = { sentToAll = true, sentToPlayers = true },
+	methods = METHODS_REMOTE_EVENT,
+}
+
+CLASS_SPECS["RemoteFunction"] = {
+	callbacks = { OnServerInvoke = "function?", OnClientInvoke = "function?" },
+	methods = METHODS_REMOTE_FUNCTION,
+}
+
+CLASS_SPECS["BillboardGui"] = {
+	props = {
+		Size = "UDim2",
+		StudsOffset = "Vector3",
+		AlwaysOnTop = "boolean",
+		MaxDistance = "number",
+		Enabled = "boolean",
+	},
+}
+
+CLASS_SPECS["TextLabel"] = {
+	props = {
+		Size = "UDim2",
+		Text = "string",
+		Font = "Enum:Font",
+		TextColor3 = "Color3",
+		TextStrokeTransparency = "number",
+		TextScaled = "boolean",
+		BackgroundTransparency = "number",
+		BackgroundColor3 = "Color3",
+		TextSize = "number",
+		RichText = "boolean",
+		Visible = "boolean",
+	},
+}
+
+CLASS_SPECS["Atmosphere"] = {
+	props = {
+		Density = "number",
+		Offset = "number",
+		Color = "Color3",
+		Decay = "Color3",
+		Glare = "number",
+		Haze = "number",
+	},
+}
+
+CLASS_SPECS["Clouds"] = {
+	props = {
+		Cover = "number",
+		Density = "number",
+		Color = "Color3",
+		Enabled = "boolean",
+	},
+}
+
+CLASS_SPECS["Lighting"] = {
+	props = {
+		Ambient = "Color3",
+		OutdoorAmbient = "Color3",
+		Brightness = "number",
+		ExposureCompensation = "number",
+		FogColor = "Color3",
+		FogStart = "number",
+		FogEnd = "number",
+		ClockTime = "number",
+		GlobalShadows = "boolean",
+	},
+	scriptSecurity = { Technology = true },
+}
+
+CLASS_SPECS["Players"] = {
+	signals = { PlayerAdded = true, PlayerRemoving = true },
+	methods = METHODS_PLAYERS,
+}
+
+CLASS_SPECS["Player"] = {
+	props = { UserId = "number", Character = "Model?" },
+	signals = { CharacterAdded = true },
+}
+
+CLASS_SPECS["RunService"] = {
+	signals = { Heartbeat = true, PreSimulation = true, PostSimulation = true },
+	methods = METHODS_RUN_SERVICE,
+}
+
+CLASS_SPECS["HttpService"] = {
+	methods = METHODS_HTTP,
+}
+
+CLASS_SPECS["DataStoreService"] = {
+	methods = METHODS_DATASTORE,
+}
+
 --=============================================================================
 -- The world
 --=============================================================================
@@ -567,15 +1512,14 @@ function Roblox.new(): any
 	oceanFolder.Name = "Ocean"
 	oceanFolder.Parent = workspace
 
-	-- Terrain exists (as a property, which is how Environment reads it) but has
-	-- no Water child — exactly what a fresh Studio place gives.
+	-- Terrain exists (as a property, which is how the boot test probes it) but
+	-- has no Water child — exactly what a fresh Studio place gives.
 	local terrain = makeInstance("Terrain")
 	terrain.Name = "Terrain"
-	workspace.Terrain = terrain
+	workspace.__values.Terrain = terrain
 
 	local lighting = makeInstance("Lighting")
 	lighting.Name = "Lighting"
-	lighting.PropertyChangedSignal = Signal.new("Lighting.PropertyChangedSignal")
 
 	local replicatedStorage = makeInstance("ReplicatedStorage")
 	replicatedStorage.Name = "ReplicatedStorage"
@@ -585,41 +1529,15 @@ function Roblox.new(): any
 
 	local players = makeInstance("Players")
 	players.Name = "Players"
-	players.PlayerAdded = Signal.new("Players.PlayerAdded")
-	players.PlayerRemoving = Signal.new("Players.PlayerRemoving")
-	function players:GetPlayers(): { any }
-		local list = {}
-		for _, child in self.__children do
-			if child.__class == "Player" then
-				table.insert(list, child)
-			end
-		end
-		return list
-	end
 
-	local runService = { Heartbeat = Signal.new("RunService.Heartbeat") }
+	local runService = makeInstance("RunService")
+	runService.Name = "RunService"
 
-	local dataStoreService = {}
-	function dataStoreService:GetDataStore(_name: string)
-		return makeDataStore()
-	end
+	local dataStoreService = makeInstance("DataStoreService")
+	dataStoreService.Name = "DataStoreService"
 
-	local httpService = {}
-	function httpService:JSONEncode(value: any): string
-		return jsonEncode(value)
-	end
-	function httpService:JSONDecode(_text: string): any
-		error(
-			"harness: HttpService:JSONDecode is not stubbed (requests never succeed here, so it is unreachable)",
-			2
-		)
-	end
-	function httpService:RequestAsync(_url: string, _options: any): any
-		-- Always fails, pcall'd by the caller (OceanClient). The game must
-		-- degrade to a locally-simulated ocean — that is the property under
-		-- test, so the harness must not "help" by succeeding.
-		error("harness: no network in the boot smoke test", 2)
-	end
+	local httpService = makeInstance("HttpService")
+	httpService.Name = "HttpService"
 
 	local services = {
 		Workspace = workspace,
@@ -632,7 +1550,7 @@ function Roblox.new(): any
 		HttpService = httpService,
 	}
 
-	local gameImpl = {}
+	local gameImpl = { __closeCallbacks = {} }
 	function gameImpl:GetService(name: string): any
 		local service = services[name]
 		if service == nil then
@@ -643,10 +1561,29 @@ function Roblox.new(): any
 		end
 		return service
 	end
-	gameImpl.__closeCallbacks = {}
 	function gameImpl:BindToClose(fn: any)
 		table.insert(self.__closeCallbacks, fn)
 	end
+	setmetatable(gameImpl, {
+		-- game.Workspace / game.Players etc. are real DataModel properties;
+		-- anything else on game is an error, as in Studio.
+		__index = function(_self: any, key: string)
+			local service = services[key]
+			if service == nil then
+				error(
+					string.format('%s is not a valid member of DataModel "game"', tostring(key)),
+					0
+				)
+			end
+			return service
+		end,
+		__newindex = function()
+			error(
+				"harness: game is read-only (GetService and BindToClose are its callable surface)",
+				0
+			)
+		end,
+	})
 
 	world.game = gameImpl
 	world.workspace = workspace
@@ -658,6 +1595,7 @@ function Roblox.new(): any
 	world.UDim2 = UDim2
 	world.Enum = Enum
 	world.task = Task
+	world.typeof = robloxTypeof
 	world.services = services
 	world.taskErrors = Task.errors
 	world.flushTasks = Task.flush
@@ -668,11 +1606,12 @@ function Roblox.new(): any
 		local player = makeInstance("Player")
 		player.Name = name
 		player.UserId = userId
-		player.CharacterAdded = Signal.new("Player.CharacterAdded")
 		return player
 	end
 
-	--- A character whose HumanoidRootPart Main can reposition.
+	--- A character whose HumanoidRootPart Main can reposition. PrimaryPart is
+	--- set with the modern property form — the SetPrimaryPart() method was
+	--- removed from Roblox and the harness rejects it.
 	function world.makeCharacter(): any
 		local character = makeInstance("Model")
 		character.Name = "SmokeCharacter"
@@ -680,7 +1619,7 @@ function Roblox.new(): any
 		root.Name = "HumanoidRootPart"
 		root.CFrame = CFrame.new(0, 0, 0)
 		root.Parent = character
-		character:SetPrimaryPart(root)
+		character.PrimaryPart = root
 		return character
 	end
 

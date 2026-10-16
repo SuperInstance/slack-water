@@ -337,7 +337,6 @@ function WorldGenService.buildDeck(folder: any): any
 	dock.CastShadow = false
 	dock.Parent = deck
 
-	deck:SetPrimaryPart(hull)
 	deck.Parent = folder
 
 	return deck
@@ -507,7 +506,7 @@ function WorldGenService.buildRegion(parent: any, region: any, index: number): a
 	text.TextScaled = true
 	text.Parent = label
 
-	marker:SetPrimaryPart(disc)
+	marker.PrimaryPart = disc
 	marker.Parent = parent
 
 	return marker
