@@ -127,7 +127,15 @@ end
 --=============================================================================
 
 local Vector3 = {}
-Vector3.__index = Vector3
+-- Real Roblox Vector3 exposes .Magnitude as a number. Modelling it as a plain
+-- table field would let a metatable-indexed helper look like it compiled when
+-- it had actually errored on every call.
+Vector3.__index = function(t, k)
+	if k == "Magnitude" then
+		return math.sqrt(t.X * t.X + t.Y * t.Y + t.Z * t.Z)
+	end
+	return Vector3[k]
+end
 
 function Vector3.new(x: number?, y: number?, z: number?): any
 	return setmetatable({ X = x or 0, Y = y or 0, Z = z or 0 }, Vector3)

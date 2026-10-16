@@ -18,6 +18,19 @@ public class Auto {
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out R r);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref P p);
     [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, IntPtr e);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+
+    // SetCursorPos + SendInput moves the cursor but Studio (Qt) never sees the
+    // click land. Posting the window messages directly at the client rect
+    // sidesteps the cursor and the desktop entirely.
+    public static void PostClick(IntPtr h, int cx, int cy) {
+        IntPtr lp = (IntPtr)((cy << 16) | (cx & 0xFFFF));
+        PostMessage(h, 0x0200, IntPtr.Zero, lp);   // WM_MOUSEMOVE
+        System.Threading.Thread.Sleep(150);
+        PostMessage(h, 0x0201, (IntPtr)1, lp);    // WM_LBUTTONDOWN, MK_LBUTTON
+        System.Threading.Thread.Sleep(110);
+        PostMessage(h, 0x0202, IntPtr.Zero, lp);  // WM_LBUTTONUP
+    }
 
     [StructLayout(LayoutKind.Sequential)] public struct R { public int L, T, Ri, B; }
     [StructLayout(LayoutKind.Sequential)] public struct P { public int X, Y; }
@@ -43,6 +56,34 @@ public class Auto {
         KI u = new KI(); u.vk = vk; u.f = 0x0002;
         IN i2 = new IN(); i2.type = 1; i2.u.ki = u;
         SendInput(2, new IN[] { i1, i2 }, SZ);
+    }
+
+    // Studio's stop shortcut is Shift+F5 and F5 is the play shortcut. A bare
+    // Tap() cannot express the modifier, and clicking the toolbar has proved
+    // unreliable while a play session has the cursor captured.
+    public static void TapShifted(ushort vk) {
+        keybd_event(0x10, 0, 0, IntPtr.Zero);   // SHIFT down
+        System.Threading.Thread.Sleep(120);
+        Tap(vk);
+        System.Threading.Thread.Sleep(120);
+        keybd_event(0x10, 0, 2, IntPtr.Zero);   // SHIFT up
+    }
+
+    // Repeat a key. Roblox's default camera is keyboard-rotational on the arrow
+    // keys and WASD drives the character, so repeated taps are the only way to
+    // steer the view when synthetic mouse input is not landing.
+    public static void TapN(ushort vk, int count, int gapMs) {
+        for (int i = 0; i < count; i++) {
+            Tap(vk);
+            System.Threading.Thread.Sleep(gapMs);
+        }
+    }
+
+    // Hold a key down for a while, for walking.
+    public static void Hold(ushort vk, int ms) {
+        keybd_event((byte)vk, 0, 0, IntPtr.Zero);
+        System.Threading.Thread.Sleep(ms);
+        keybd_event((byte)vk, 0, 2, IntPtr.Zero);
     }
 
     // Windows foreground lock: a background process cannot steal focus with a

@@ -119,6 +119,16 @@ local Types = require("./../src/Shared/Types")
 local roblox = Roblox.new()
 local runner = Runner.new(sources, roblox)
 
+-- Plant the baseplate that every fresh Roblox place ships with, BEFORE the
+-- server boots. Without this the "baseplate is gone" assertion below would
+-- pass trivially against an empty Workspace and prove nothing.
+local defaultBaseplate = roblox.Instance.new("Part")
+defaultBaseplate.Name = "Baseplate"
+defaultBaseplate.Size = roblox.Vector3.new(512, 20, 512)
+defaultBaseplate.CFrame = roblox.CFrame.new(0, 0, 0)
+defaultBaseplate.Anchored = true
+defaultBaseplate.Parent = roblox.workspace
+
 local bootOk, bootErr = pcall(function()
 	return runner:load("src/Server/Main.server.luau")
 end)
@@ -282,6 +292,18 @@ suite("worldgen — a player can stand in this world", function()
 		local floor = oceanFolder:FindFirstChild("SeaFloor")
 		assertTrue(floor ~= nil, "no SeaFloor — a player who falls has nothing to land on")
 		assertTrue(floor.CFrame.Y < 0, "SeaFloor should sit below the water line")
+	end)
+
+	test("the default baseplate is gone", function()
+		-- Roblox ships every new place with a 512x20x512 grey Baseplate at y = 0,
+		-- which is exactly where the tide sits. Left in place it renders as a
+		-- checkered floor across the sea and hides the water entirely. This was
+		-- visible on screen before it was asserted.
+		local baseplate = workspace:FindFirstChild("Baseplate")
+		assertTrue(
+			baseplate == nil,
+			"the default Baseplate is still in Workspace and will draw over the sea"
+		)
 	end)
 
 	test("there is actually water on the ocean", function()

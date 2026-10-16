@@ -396,6 +396,29 @@ end
 -- Grounds
 --=============================================================================
 
+--- Remove the baseplate a new Roblox place ships with.
+---
+--- Roblox's default Baseplate is a 512x20x512 grey Part sitting at y = 0, which
+--- is exactly where the tide sits. Left alone it reads as a checkered floor
+--- under the sea and hides the water surface, which is the whole picture. It is
+--- identified by shape and position rather than by name alone, so a part Casey
+--- deliberately named something else is not silently deleted.
+local function removeDefaultBaseplate(): ()
+	local baseplate = Workspace:FindFirstChild("Baseplate")
+	if baseplate and baseplate:IsA("BasePart") then
+		local size = baseplate.Size
+		local pos = baseplate.Position
+		local slab = math.abs(size.X - 512) < 1
+				and math.abs(size.Y - 20) < 1
+				and math.abs(size.Z - 512) < 1
+		local atOrigin = pos.Magnitude < 64
+		if slab and atOrigin then
+			baseplate:Destroy()
+			return
+		end
+	end
+end
+
 --- Build the playable representation of every region in the simulation.
 ---
 --- Grounds are laid out on a deterministic grid derived from their index rather
@@ -403,6 +426,7 @@ end
 --- find it in the same place next session, which matters when the world persists.
 function WorldGenService.build(ocean: any): ()
 	WorldGenService.clear()
+	removeDefaultBaseplate()
 
 	local folder = Workspace:FindFirstChild("Ocean")
 	if not folder then
@@ -487,12 +511,16 @@ function WorldGenService.buildRegion(parent: any, region: any, index: number): a
 
 	-- Billboard so the name is legible from the boat. Offset up so it does not
 	-- intersect the player's head on approach.
+	--
+	-- BillboardGui Size offsets are in STUDS, not pixels. At 220x60 this was a
+	-- wall over three times wider than REGION_SPACING and it swallowed the whole
+	-- viewport. A chart annotation should sit over its ground, not own the sky.
 	local label = Instance.new("BillboardGui")
 	label.Name = "Label"
-	label.Size = UDim2.fromOffset(220, 60)
-	label.StudsOffset = Vector3.new(0, 14, 0)
+	label.Size = UDim2.fromOffset(34, 10)
+	label.StudsOffset = Vector3.new(0, 8, 0)
 	label.AlwaysOnTop = true
-	label.MaxDistance = 500
+	label.MaxDistance = 300
 	label.Parent = marker
 
 	local text = Instance.new("TextLabel")
