@@ -125,6 +125,21 @@ Config.HOURS_PER_DAY = 24
 Config.INITIAL_REGIONS = 14
 Config.BANKS_PER_ROUND = 2
 
+-- Hard ceiling on how many grounds can exist at once.
+--
+-- Discovery is a treadmill by design -- new banks arrive every couple of
+-- in-game months so the water is never all charted -- but without a ceiling it
+-- never stops. A session left running reached 108 grounds and climbing, and
+-- because each round rebuilt the whole world (see OceanService.composeNewBanks)
+-- the cost of that rebuild grew with the ocean. It would have ground Robo to a
+-- halt.
+--
+-- The cap is also the right game design rather than a concession: once the
+-- chart is full, scarcity has to come from the stocks actually being fished
+-- down, which is the premise. An endless supply of fresh grounds quietly
+-- cancels it.
+Config.MAX_REGIONS = 60
+
 --=============================================================================
 -- Casting
 --=============================================================================

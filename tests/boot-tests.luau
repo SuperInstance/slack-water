@@ -532,6 +532,61 @@ suite("heartbeat — the simulation actually ticks", function()
 		assertEq(#remote.sentToAll, 3 * Config.BANKS_PER_ROUND, "RegionDiscovered broadcasts")
 	end)
 
+	test("discovery never runs past the ocean's ceiling", function()
+		-- A session left running hit 108 grounds and was still climbing. Every
+		-- ground is a marker, a label and water tiles, and each round rebuilt
+		-- the entire world, so unbounded discovery is a performance cliff rather
+		-- than an inconvenience.
+		local rounds = 0
+		local regionsStart = #ocean.order
+		while #ocean.order < Config.MAX_REGIONS + Config.BANKS_PER_ROUND * 2 do
+			roblox.services.RunService.Heartbeat:Fire(20)
+			runner:flushTasks()
+			rounds += 1
+			if rounds > 500 then
+				break
+			end
+		end
+		assertTrue(
+			#ocean.order <= Config.MAX_REGIONS,
+			"the ocean grew to " .. tostring(#ocean.order) .. " grounds, past the ceiling of "
+				.. tostring(Config.MAX_REGIONS)
+		)
+		assertTrue(
+			#ocean.order > regionsStart,
+			"discovery stopped entirely instead of growing to the ceiling"
+		)
+	end)
+
+	test("one world rebuild per round, not one per region", function()
+		-- Main turns regionAdded into a full WorldGen.build(). Firing it per
+		-- region meant every round tore down and recreated every marker and all
+		-- 676 water tiles BANKS_PER_ROUND times over, and the cost grew with the
+		-- ocean. Count the fires against the rounds actually run.
+		local fires = 0
+		local rounds = 0
+		local conn = svc.regionAdded.Event:Connect(function()
+			fires += 1
+		end)
+
+		for _ = 1, 6 do
+			roblox.services.RunService.Heartbeat:Fire(20)
+			runner:flushTasks()
+			rounds += 1
+		end
+		conn:Disconnect()
+
+		assertTrue(
+			rounds > 0,
+			"no rounds ran, so this test would pass without checking anything"
+		)
+		assertTrue(
+			fires <= rounds,
+			"regionAdded fired " .. tostring(fires) .. " times over " .. tostring(rounds)
+				.. " rounds; every fire is a full world rebuild"
+		)
+	end)
+
 	test("discovered grounds are built into the world", function()
 		local oceanFolder = workspace:FindFirstChild("Ocean")
 		local markers = markerModels(oceanFolder)

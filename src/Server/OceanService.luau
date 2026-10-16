@@ -526,6 +526,9 @@ function Service.composeNewBanks(svc: Service): ()
 	local admitted = 0
 
 	for _, candidate in result.banks do
+		if #svc.ocean.order >= Config.MAX_REGIONS then
+			break
+		end
 		local BankSpec = require(Shared.Ocean.BankSpec)
 		local id = "ai_" .. svc.round .. "_" .. tostring(admitted + 1)
 		local report = BankSpec.validate(candidate, id)
@@ -533,7 +536,6 @@ function Service.composeNewBanks(svc: Service): ()
 		if report.ok and report.bank then
 			OceanSim.addRegion(svc.ocean, BankSpec.toRegion(report.bank))
 			admitted += 1
-			svc.regionAdded:Fire()
 			svc.remotes[Types.RegionDiscovered]:FireAllClients({
 				id = report.bank.id,
 				name = report.bank.name,
@@ -551,12 +553,21 @@ function Service.composeNewBanks(svc: Service): ()
 		Service.fillWithProceduralBanks(svc)
 	end
 
+	-- ONE rebuild per round, not one per region. Main turns regionAdded into a
+	-- full WorldGen.build(), which tears down and recreates every marker and
+	-- all 676 water tiles. Firing per region made each round do BANKS_PER_ROUND
+	-- complete rebuilds of the entire ocean, and the cost grew with the ocean.
+	if admitted > 0 then
+		svc.regionAdded:Fire()
+	end
+
 	print(
 		string.format(
-			"[slack-water] composition round %d: %d/%d banks admitted",
+			"[slack-water] composition round %d: %d/%d banks admitted (%d grounds total)",
 			svc.round,
 			admitted,
-			#result.banks
+			#result.banks,
+			#svc.ocean.order
 		)
 	)
 end
@@ -565,10 +576,14 @@ end
 --- backend at all — the game must never be able to run dry.
 function Service.fillWithProceduralBanks(svc: Service): ()
 	local nextIndex = #svc.ocean.order + 1
+	local added = 0
 	for i = nextIndex, nextIndex + Config.BANKS_PER_ROUND - 1 do
+		if #svc.ocean.order >= Config.MAX_REGIONS then
+			break
+		end
 		local region = Regions.generateOne(svc.seed, i)
 		OceanSim.addRegion(svc.ocean, region)
-		svc.regionAdded:Fire()
+		added += 1
 		svc.remotes[Types.RegionDiscovered]:FireAllClients({
 			id = region.id,
 			name = region.name,
@@ -579,6 +594,11 @@ function Service.fillWithProceduralBanks(svc: Service): ()
 			species = {},
 			origin = "procedural",
 		})
+	end
+
+	-- Same coalescing as composeNewBanks: one world rebuild per round.
+	if added > 0 then
+		svc.regionAdded:Fire()
 	end
 end
 
