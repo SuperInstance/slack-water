@@ -227,3 +227,4 @@ surveyed data.
 | `docs/TESTING.md` | How the test suite is organised |
 | `docs/HARNESS-FIDELITY.md` | What the fake Roblox does and does not model |
 | `docs/STUDIO-AUTOMATION.md` | Driving Studio from a shell, and what fails |
+| `docs/WORKLOG.md` | This session: what was done, what it proved, and token use |
