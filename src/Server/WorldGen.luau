@@ -42,12 +42,17 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local OceanSim = require(Shared.Ocean.OceanSim)
 local Waves = require(Shared.Ocean.Waves)
 local Water = require(Shared.Ocean.Water)
+local Rng = require(Shared.Ocean.Rng)
 local OceanSurface = require(script.Parent.OceanSurface)
 local OceanService = require(script.Parent.OceanService)
 
 -- Distance between grounds on the grid. Kept tight enough that several are
 -- visible from the boat at once.
 local REGION_SPACING = 70
+
+-- Peaks in the surrounding shoreline. Few on purpose: they are silhouette, and
+-- every one of them is a part Robo has to keep in memory.
+local SHORE_PEAKS = 14
 
 -- Colour by habitat, so a player can read the map by colour alone before they
 -- can read a label. Tuned to stay distinguishable on a small, low-contrast
@@ -419,6 +424,76 @@ local function removeDefaultBaseplate(): ()
 	end
 end
 
+--=============================================================================
+-- Land
+--=============================================================================
+
+--- Build the shoreline the boat actually fishes off.
+---
+--- Until this existed the world was open water in every direction, which is
+--- accurate and completely unrecognisable: Sitka sits on the coast of Baranof
+--- Island, and the water there is inside a bay ringed by forested peaks. Open
+--- water to the horizon read as "nothing has been built yet" rather than as a
+--- place.
+---
+--- Deliberately cheap. This is silhouette, not scenery: a handful of large
+--- anchored parts with no collision and no material detail, because Robo is
+--- roughly 80% mobile and the fishing grounds are what have to run.
+---
+--- Land does not ride the tide. It is not part of the ocean simulation.
+function WorldGenService.buildShore(folder: any): any
+	local shore = Instance.new("Model")
+	shore.Name = "Shore"
+
+	local forestNear = Color3.fromRGB(46, 78, 62)
+	local forestFar = Color3.fromRGB(58, 88, 78)
+	local rock = Color3.fromRGB(92, 100, 106)
+
+	-- Ring the water at a radius clear of every fishing ground. The surface
+	-- spans 780 studs, so the shore sits outside it and never intersects water
+	-- the player can actually be on.
+	local ridgeRadius = 470
+
+	for i = 1, SHORE_PEAKS do
+		-- Deterministic: the same shoreline every session, like the grounds.
+		-- Seeded per peak so one peak's size never shifts another's.
+		local angleRng = Rng.new(20261014 + i * 7919)
+		local sizeRng = Rng.new(9137 + i * 31)
+		local widthRng = Rng.new(4409 + i * 17)
+
+		local phase = i / SHORE_PEAKS
+		local jitter = Rng.range(angleRng, 0, 1) - 0.5
+		local angle = (phase + jitter * 0.35) * math.pi * 2
+		local height = 60 + Rng.range(sizeRng, 0, 150)
+		local width = 150 + Rng.range(widthRng, 0, 130)
+
+		local peak = Instance.new("Part")
+		peak.Name = "Peak" .. i
+		peak.Anchored = true
+		peak.CanCollide = false
+		peak.CanQuery = false
+		peak.CanTouch = false
+		peak.CastShadow = false
+		-- A wedge makes a ridgeline instead of a wall, and the material is
+		-- Smooth so the facets catch the low sun differently.
+		peak.Shape = Enum.PartType.Wedge
+		peak.Size = Vector3.new(width, height, 90)
+		peak.CFrame = CFrame.new(
+			math.cos(angle) * ridgeRadius,
+			height / 2 - 6,
+			math.sin(angle) * ridgeRadius
+		) * CFrame.Angles(0, -angle, 0)
+		peak.Color = if i % 3 == 0 then rock else (if i % 2 == 0 then forestFar else forestNear)
+		peak.TopSurface = Enum.SurfaceType.Smooth
+		peak.BottomSurface = Enum.SurfaceType.Smooth
+		peak.Material = Enum.Material.SmoothPlastic
+		peak.Parent = shore
+	end
+
+	shore.Parent = folder
+	return shore
+end
+
 --- Build the playable representation of every region in the simulation.
 ---
 --- Grounds are laid out on a deterministic grid derived from their index rather
@@ -436,6 +511,7 @@ function WorldGenService.build(ocean: any): ()
 	end
 
 	WorldGenService.buildFloor(folder)
+	WorldGenService.buildShore(folder)
 	local deck = WorldGenService.buildDeck(folder)
 	local spawn = WorldGenService.buildSpawn(folder)
 

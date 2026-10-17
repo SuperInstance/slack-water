@@ -294,8 +294,31 @@ suite("worldgen — a player can stand in this world", function()
 		assertTrue(floor.CFrame.Y < 0, "SeaFloor should sit below the water line")
 	end)
 
-	test("the default baseplate is gone", function()
-		-- Roblox ships every new place with a 512x20x512 grey Baseplate at y = 0,
+	test("there is a shoreline, so the world is a place and not open ocean", function()
+		-- The world was open water in every direction. Sitka sits on the coast
+		-- of Baranof Island; without land on the horizon it read as a scene
+		-- nobody had built yet rather than as somewhere to fish.
+		local shore = oceanFolder:FindFirstChild("Shore")
+		assertTrue(shore ~= nil, "no Shore in the world — nothing but open water")
+
+		local peaks = shore:GetChildren()
+		assertTrue(#peaks >= 8, "the shoreline has only " .. tostring(#peaks) .. " peaks")
+
+		-- Robo is ~80% mobile, so the shore has to stay cheap.
+		assertTrue(
+			#peaks <= 24,
+			"the shoreline is " .. tostring(#peaks) .. " parts; it is scenery, not the fishing grounds"
+		)
+
+		-- Land must never be something a player can stand on or snag a line
+		-- on, and it must not be registered with the tide.
+		for _, peak in peaks do
+			assertEq(peak.CanCollide, false, "a shore peak is collidable — it is in the way of fishing")
+			assertEq(peak.Anchored, true, "a shore peak is not anchored and will fall")
+		end
+	end)
+
+test("the default baseplate is gone", function()
 		-- which is exactly where the tide sits. Left in place it renders as a
 		-- checkered floor across the sea and hides the water entirely. This was
 		-- visible on screen before it was asserted.

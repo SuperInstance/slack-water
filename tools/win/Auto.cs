@@ -86,6 +86,31 @@ public class Auto {
         keybd_event((byte)vk, 0, 2, IntPtr.Zero);
     }
 
+    // Press a modifier and a key together (Ctrl+Down and friends).
+    public static void Chord(ushort mod, ushort vk) {
+        keybd_event((byte)mod, 0, 0, IntPtr.Zero);
+        System.Threading.Thread.Sleep(90);
+        Tap(vk);
+        System.Threading.Thread.Sleep(90);
+        keybd_event((byte)mod, 0, 2, IntPtr.Zero);
+    }
+
+    // Type literal text. KEYEVENTF_UNICODE delivers characters independently of
+    // the active keyboard layout, which matters because this machine is not US
+    // layout and a scan-code based "print $x" would come out as gibberish.
+    public static void TypeText(string s) {
+        foreach (char c in s) {
+            KI down = new KI();
+            down.vk = 0; down.sc = (ushort)c; down.f = 0x0004;   // KEYEVENTF_UNICODE
+            KI up = new KI();
+            up.vk = 0; up.sc = (ushort)c; up.f = 0x0004 | 0x0002; // ... | KEYEVENTF_KEYUP
+            IN i1 = new IN(); i1.type = 1; i1.u.ki = down;
+            IN i2 = new IN(); i2.type = 1; i2.u.ki = up;
+            SendInput(2, new IN[] { i1, i2 }, SZ);
+            System.Threading.Thread.Sleep(14);
+        }
+    }
+
     // Windows foreground lock: a background process cannot steal focus with a
     // bare SetForegroundWindow. Synthesising ALT first grants temporary
     // foreground rights.

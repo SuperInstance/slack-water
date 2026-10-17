@@ -77,4 +77,17 @@ switch ($Action) {
         [Auto]::Hold([uint16]$X, $Y)
         Write-Output "held key $X for ${Y}ms"
     }
+    "chord" {
+        # X = modifier VK, Y = key VK (Ctrl+Down = 17,40)
+        [Auto]::Chord([uint16]$X, [uint16]$Y)
+        Write-Output "sent chord $X+$Y"
+    }
+    "type" {
+        # Text arrives in SW_TEXT: param blocks have proven flaky on this
+        # PowerShell build, and an env var sidesteps quoting entirely.
+        $text = $env:SW_TEXT
+        if (-not $text) { Write-Output "SW_TEXT not set"; exit 1 }
+        [Auto]::TypeText($text)
+        Write-Output "typed $(([string]$text).Length) chars"
+    }
 }
