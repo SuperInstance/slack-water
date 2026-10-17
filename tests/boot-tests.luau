@@ -973,6 +973,40 @@ suite("harness fidelity — the Runner resolves what Studio resolves, and nothin
 		end)
 	end)
 
+	test("OceanClient uses the single-table form the API actually has", function()
+		-- The fidelity test above proves the (url, options) form raises. That
+		-- is only worth anything if something checks the production code uses
+		-- the form that survived. Nothing did. OceanClient kept the two-argument
+		-- call, every backend request failed, both failure paths returned in
+		-- silence, and the game quietly ran on procedural banks for an entire
+		-- session while the AI composer -- the headline feature -- never ran
+		-- once. 432 assertions passed the whole time.
+		local http: any = roblox.services.HttpService
+
+		local before = #roblox.httpCalls
+		-- Through the Runner, not a bare require: OceanClient touches `game`
+		-- at module scope, so it needs the harness's service environment.
+		local OceanClient = runner:load("src/Shared/Net/OceanClient.luau")
+		local result = OceanClient.composeBanks(3)
+
+		local calls = {}
+		for i = before + 1, #roblox.httpCalls do
+			table.insert(calls, roblox.httpCalls[i])
+		end
+
+		assertTrue(#calls >= 1, "composeBanks never reached RequestAsync at all")
+		local seen = calls[#calls]
+		assertEq(type(seen), "table", "RequestAsync must be given ONE options table")
+		assertEq(type(seen.Url), "string", "options.Url must be a string")
+		assertEq(seen.Method, "POST", "composeBanks must POST")
+		assertTrue(
+			tostring(seen.Url):find("/banks/compose", 1, true) ~= nil,
+			"composed banks were requested from the wrong endpoint: " .. tostring(seen.Url)
+		)
+		-- A failed backend must degrade to a local ocean, never crash the tick.
+		assertEq(result.ok, false, "a failing backend must report ok == false")
+	end)
+
 	test("GetPropertyChangedSignal fires only when the value changes", function()
 		local part = roblox.Instance.new("Part")
 		local fired = 0

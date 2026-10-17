@@ -1249,6 +1249,10 @@ local METHODS_RUN_SERVICE = mergeMethods(METHODS_BASE, {
 	end,
 })
 
+-- Every RequestAsync call the code under test made, recorded so a test can
+-- assert the argument shape. See RequestAsync below.
+local HTTP_CALLS: { any } = {}
+
 local METHODS_HTTP = mergeMethods(METHODS_BASE, {
 	JSONEncode = httpJSONEncode,
 	JSONDecode = function(_self: any, _text: string): any
@@ -1269,6 +1273,10 @@ local METHODS_HTTP = mergeMethods(METHODS_BASE, {
 				2
 			)
 		end
+		-- Record the call so a test can assert the shape the production code
+		-- actually sends. Methods cannot be monkey-patched here -- that is
+		-- itself fidelity -- so the recorder is the only way to observe this.
+		table.insert(HTTP_CALLS, options)
 		if type(options.Url) ~= "string" then
 			error(
 				"harness: HttpService:RequestAsync — options.Url must be a string (the real API takes ONE options table: Url, Method, Headers, Body)",
@@ -1597,6 +1605,7 @@ function Roblox.new(): any
 	world.workspace = workspace
 	world.terrain = terrain
 	world.Instance = { new = makeInstance }
+	world.httpCalls = HTTP_CALLS
 	world.Vector3 = Vector3
 	world.CFrame = CFrame
 	world.Color3 = Color3

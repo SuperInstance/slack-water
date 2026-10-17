@@ -512,12 +512,30 @@ function Service.composeNewBanks(svc: Service): ()
 	end)
 
 	if not ok then
+		-- Previously this returned in silence. A backend that is down, misnamed
+		-- or unreachable looked exactly like a backend that is simply never
+		-- called, which is how "the AI composer never runs" went unnoticed for
+		-- an entire working session. Every fallback now says why.
+		print(
+			string.format(
+				"[slack-water] compose round %d: backend module unavailable (%s); using procedural banks",
+				svc.round,
+				tostring(OceanClient)
+			)
+		)
 		Service.fillWithProceduralBanks(svc)
 		return
 	end
 
 	local result = OceanClient.composeBanks(svc.round)
 	if not result.ok or not result.banks or #result.banks == 0 then
+		print(
+			string.format(
+				"[slack-water] compose round %d: backend unusable (%s); using procedural banks",
+				svc.round,
+				tostring(result.error)
+			)
+		)
 		Service.fillWithProceduralBanks(svc)
 		return
 	end

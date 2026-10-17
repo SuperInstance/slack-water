@@ -52,6 +52,18 @@ local function url(path: string): string?
 end
 
 --- Perform a request with a hard timeout and a soft failure.
+---
+--- NOTE ON THE ARGUMENT SHAPE. HttpService:RequestAsync takes ONE table.
+--- The old two-argument form RequestAsync(url, options) was removed, and
+--- passing it raises "Unable to cast string to Dictionary". That is not a
+--- hypothetical: this function used the two-argument form, so every call to
+--- the backend failed, and because both failure paths returned in silence the
+--- game quietly fell back to procedural banks for an entire working session
+--- with the AI composer never once running.
+---
+--- The headless harness already modelled the single-table form correctly,
+--- which is why it also rejected the two-argument call. Both the harness and
+--- this comment were right and the code was wrong.
 local function request(path: string, method: string, body: any?): (boolean, any?, string?)
 	local endpoint = url(path)
 	if not endpoint then
@@ -59,6 +71,7 @@ local function request(path: string, method: string, body: any?): (boolean, any?
 	end
 
 	local options: any = {
+		Url = endpoint,
 		Method = method,
 		Headers = {
 			["Content-Type"] = "application/json",
@@ -70,7 +83,7 @@ local function request(path: string, method: string, body: any?): (boolean, any?
 	end
 
 	local ok, result = pcall(function()
-		return HttpService:RequestAsync(endpoint, options)
+		return HttpService:RequestAsync(options)
 	end)
 
 	if not ok then
