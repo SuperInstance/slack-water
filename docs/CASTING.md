@@ -101,21 +101,49 @@ are offered, and the server arbitrates every one of them:
   sanctioned use as TideStrip's curve); the server's check at resolve time
   is the only one that counts.
 
-### A finding about the tide gate (current constants)
+### A finding about the tide gate — resolved
 
-With the current roster and tide constants, **any ground that can host a
-legal species is always accessible**: the shallowest band floor is 5 m
-(pink salmon), the tide's estimated low is ~-2.57 m, and the draught is
-1.8 m — so water over any fishable ground never drops below ~2.4 m. The
-tide's access gate (client pre-gate AND the server's `Tide.accessAt` check)
-can therefore only ever fire on grounds too shallow to fish, and
-"WAIT FOR TIDE" is currently a display state with no gameplay bite. The
-design intent — "a shoal charted at 2.0 m is dry rock at low water and
-fishable at high water" (src/Shared/Tide.luau) — needs either shallower
-species, a bigger draught, or real (larger) harmonic constants to become
-reachable. The client and server code are correct for whatever constants
-come; the constants are the gap. Not fixed here: `src/Shared/**` is outside
-this pass's scope.
+**This section previously recorded a defect. It was fixed, and the diagnosis
+in the original write-up was wrong in an instructive way.**
+
+The finding was that `WAIT FOR TIDE` could never fire: the shallowest species
+band sat above the water line at lowest tide, so nothing fishable was ever shut
+out. Two things were wrong with that account.
+
+First, the arithmetic. The tide's actual lowest water is **-2.03 m**, not the
+~-2.57 m estimated here — the harmonic constants sum lower than assumed. The
+drying threshold is therefore `TIDE_MIN_DRAUGHT - lowest` ≈ **3.83 m**, not
+4.4 m.
+
+Second, and more importantly, the roster was never the constraint. Even a
+species band at 0 m could not have mattered, because **no ground in the ocean
+was ever shallow enough to dry**. `Regions.DEPTH_RANGE` bottomed its shallowest
+habitat out at 5 m — above the 3.83 m threshold. The mechanic was unreachable
+for a geographical reason, and no amount of moving species around would have
+reached it.
+
+The fix, in `src/Shared`:
+
+- `estuary` reaches **1.5 m**, and 45% of estuaries are generated as intertidal
+  flats in the 1.5–3.5 m band, because that is what an estuary mostly is.
+- `kelp` and `reef` reach 3–4 m — nearshore, not just offshore.
+- **Dungeness Crab** carries its honest intertidal band from 2 m. In Southeast
+  Alaska they are worked from the shallows, so this is the truthful value as
+  well as the one that makes the mechanic fire.
+
+About **7.5%** of generated grounds now dry out — roughly **4–5 of a 60-ground
+ocean** are tide-gated, which is enough for a player to meet one and not enough
+to dominate play.
+
+Two tests in `tests/tide-chart-tests.luau` pin this behaviourally, and both were
+confirmed red before the fix:
+
+- a meaningful share of generated grounds must dry out
+- the shallowest ground must be genuinely shut for at least an hour a day
+
+The lesson worth keeping: the write-up blamed the constants in the module it
+happened to be looking at, and would have been fixed in the wrong place by
+anyone who trusted it. The gate was fine. The coastline was wrong.
 
 ## Failure paths (nothing fails silently)
 

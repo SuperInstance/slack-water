@@ -71,12 +71,19 @@ local HAZARDS: { string } = {
 --- ocean feel like real water rather than noise.
 -- Luau has no tuple type, so each range is a two-element array: [min, max].
 local DEPTH_RANGE: { [string]: { number } } = {
-	kelp = { 12, 90 },
-	reef = { 25, 220 },
-	sand = { 15, 320 },
+	-- The shallow ranges are not decoration. A ground only dries out -- and so
+	-- only ever makes the tide gate bite -- if its charted depth is below
+	-- TIDE_MIN_DRAUGHT minus the lowest water, which is about 3.8 m. With the
+	-- old minimum of 5 m on the shallowest habitat, not one ground in the
+	-- ocean could ever dry, so "WAIT FOR TIDE" was unreachable and the whole
+	-- tidal mechanic was decorative. Estuaries and nearshore kelp are exactly
+	-- the places that go dry in Southeast Alaska.
+	kelp = { 3, 70 },
+	reef = { 4, 180 },
+	estuary = { 1.5, 90 },
+	sand = { 12, 320 },
 	mud = { 60, 500 },
 	open = { 40, 400 },
-	estuary = { 5, 120 },
 }
 
 --=============================================================================
@@ -99,6 +106,15 @@ local function generateRegion(rng: Rng.Rng, index: number): any
 
 	local range = DEPTH_RANGE[habitat] or { 20, 200 }
 	local depth = Rng.int(rng, range[1], range[2])
+
+	-- Estuaries are not a uniform depth distribution: most of one is intertidal
+	-- flat that drains twice a day, with a deeper channel somewhere inside it.
+	-- Rolling from the range alone made a drying ground a 1-in-400 accident,
+	-- which technically let the tide gate fire while never letting a player
+	-- meet it. These are the grounds the tide actually governs.
+	if habitat == "estuary" and Rng.chance(rng, 0.45) then
+		depth = Rng.int(rng, 1.5, 3.5)
+	end
 
 	local region = {
 		id = "r" .. tostring(index),

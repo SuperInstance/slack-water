@@ -362,6 +362,88 @@ suite("Chart — loading real data", function()
 end)
 
 --=============================================================================
+-- The tide has to be able to shut a ground out
+--
+-- The tidal mechanic is the clock of this game: a shoal is dry rock at low
+-- water and fishable at high water, so "WAIT FOR TIDE" is meant to turn a dead
+-- end into an appointment. For a long time it could not do that, and the
+-- reason was geographical rather than anything to do with the species roster.
+--
+-- A ground dries out only if its charted depth is below TIDE_MIN_DRAUGHT minus
+-- the lowest water. The shallowest habitat used to bottom out at 5 m while the
+-- drying threshold sat at about 3.8 m, so not one ground in the ocean could
+-- ever dry and the mechanic was unreachable no matter what lived there.
+-- docs/CASTING.md described the symptom; nothing asserted it.
+--=============================================================================
+
+local Regions = require("./../src/Shared/Ocean/Regions")
+
+suite("the tide can actually shut a ground out", function()
+	local lowest = math.huge
+	for h = 0, 24, 0.01 do
+		lowest = math.min(lowest, Tide.heightAt(h))
+	end
+	local dryingBelow = Config.TIDE_MIN_DRAUGHT - lowest
+
+	test("a meaningful share of generated grounds go dry at low water", function()
+		-- Behavioural, not structural: this does not care how the shallow
+		-- grounds are produced, only that a player will actually meet one.
+		local gated, total = 0, 400
+		for i = 1, total do
+			local region = Regions.generateOne(20261014, i)
+			if region.depth < dryingBelow then
+				gated += 1
+			end
+		end
+
+		assertTrue(
+			gated >= math.floor(total * 0.02),
+			string.format(
+				"only %d of %d grounds dry out (threshold %.2f m); the tide mechanic is decorative",
+				gated,
+				total,
+				dryingBelow
+			)
+		)
+	end)
+
+	test("a tide-gated ground is genuinely closed for a real stretch of the day", function()
+		-- A ground that blinks closed for two minutes is not a mechanic. Pick
+		-- the shallowest ground generated and require it to be shut for a
+		-- meaningful part of a cycle.
+		local shallowest = math.huge
+		for i = 1, 400 do
+			shallowest = math.min(shallowest, Regions.generateOne(20261014, i).depth)
+		end
+
+		assertTrue(
+			shallowest < dryingBelow,
+			string.format(
+				"the shallowest ground in 400 is %.2f m, above the %.2f m drying threshold",
+				shallowest,
+				dryingBelow
+			)
+		)
+
+		local closedFor = 0
+		for h = 0, 24, 0.01 do
+			local accessible = Tide.accessAt(shallowest, h)
+			if not accessible then
+				closedFor += 0.01
+			end
+		end
+
+		assertTrue(
+			closedFor >= 1.0,
+			string.format(
+				"the shallowest ground is only shut for %.2f h a day — there is nothing to wait for",
+				closedFor
+			)
+		)
+	end)
+end)
+
+--=============================================================================
 -- Summary
 --=============================================================================
 

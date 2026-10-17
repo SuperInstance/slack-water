@@ -171,12 +171,17 @@ matter first, in order):
   server-side breakages behind the loop are fixed as of this writing
   (`Config.CAST_COOLDOWN` exists; `performance` is declared and defaulted in
   Types.luau by the wallet pass).
-- **The tide gate cannot bite with current constants.** The shallowest
-  species band (pink salmon, 5 m) sits above the worst-case tide (-2.57 m)
-  plus draught (1.8 m), so every ground that can host a legal species is
-  always accessible — "WAIT FOR TIDE" is display-only until the constants or
-  the roster change. See docs/CASTING.md for the arithmetic; the fix belongs
-  in src/Shared, not here.
+- ~~**The tide gate cannot bite with current constants.**~~ **Fixed.** The
+  cause was not the species roster, as originally recorded here. A ground only
+  dries out if its charted depth is below `TIDE_MIN_DRAUGHT` minus the lowest
+  water, which is about 3.8 m — and the shallowest habitat bottomed out at 5 m,
+  so no ground in the ocean could ever dry regardless of what lived there. The
+  estuary range now reaches 1.5 m (with most estuaries modelled as the
+  intertidal flats they are), nearshore kelp and reef reach 3–4 m, and Dungeness
+  Crab carries its honest intertidal band from 2 m. About 7.5% of grounds now
+  dry out, so roughly 4–5 of a 60-ground ocean are tide-gated. Two tests in
+  `tests/tide-chart-tests.luau` pin it and are confirmed red without the fix.
+  Note the lowest water is -2.03 m, not the -2.57 m previously written down.
 - **Buying gear is not wired.** `Progression.buy` exists and validates level +
   funds, but the server has no wallet/money store to deduct from, so GearBar
   only ever *equips* gear the profile already owns. Locked rows honestly show

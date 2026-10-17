@@ -293,7 +293,12 @@ local SPECIES_LIST: { Species } = {
 		displayName = "Dungeness Crab",
 		scientificName = "Metacarcinus magister",
 		habitat = "reef",
-		minDepth = 15,
+		-- Genuinely intertidal. This is the species that makes the tide gate
+		-- reachable: a shallow ground that dries at low water is worthless all
+		-- day and then worth fishing at high water. In Southeast Alaska Dungeness
+		-- are worked from the shallows, so this is also the honest band rather
+		-- than one chosen to make a mechanic fire.
+		minDepth = 2.0,
 		maxDepth = 200,
 		capacity = 760,
 		growthRate = 0.07,
