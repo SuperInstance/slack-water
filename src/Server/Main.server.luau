@@ -114,7 +114,6 @@ function Main.start(): ()
 			Enum.CoreGuiType.Health,
 			Enum.CoreGuiType.Backpack,
 			Enum.CoreGuiType.EmotesMenu,
-			Enum.CoreGuiType.CoreGui,
 		} do
 			pcall(function()
 				StarterGui:SetCoreGuiEnabled(core, false)
