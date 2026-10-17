@@ -12,6 +12,7 @@
 ]]
 
 local Players = game:GetService("Players")
+local StarterGui = game:GetService("StarterGui")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -98,8 +99,43 @@ function Main.start(): ()
 		end)
 	end)
 
+	-- Roblox's own chrome sits on top of a HUD designed for a phone: the chat
+	-- box lands on the tide strip, the player list on the region panel, and the
+	-- mobile jump button on the cast bar. This belongs to bootstrap rather than
+	-- to any panel, because no panel should be deciding what else's chrome is
+	-- allowed to do.
+	--
+	-- Best-effort: SetCoreGuiEnabled has changed shape across Roblox releases,
+	-- and a failure here must never stop the ocean booting.
+	local function quietenDefaultGui(): ()
+		for _, core in {
+			Enum.CoreGuiType.Chat,
+			Enum.CoreGuiType.PlayerList,
+			Enum.CoreGuiType.Health,
+			Enum.CoreGuiType.Backpack,
+			Enum.CoreGuiType.EmotesMenu,
+			Enum.CoreGuiType.CoreGui,
+		} do
+			pcall(function()
+				StarterGui:SetCoreGuiEnabled(core, false)
+			end)
+		end
+		pcall(function()
+			StarterGui:SetCore("ChatMakeSystemMessage", false)
+		end)
+	end
+
+	-- Called once at boot rather than only in PlayerAdded, which is correct as
+	-- well as tidier: the server call applies to every player at once, so once
+	-- is enough and it also covers anyone already connected.
+	stage("ui", function()
+		quietenDefaultGui()
+	end)
+
 	Players.PlayerAdded:Connect(function(player: any)
 		player:SetAttribute("joinedAt", os.time())
+
+		quietenDefaultGui()
 
 		-- Drop the player somewhere they can actually see the water. A blank
 		-- slate at spawn is indistinguishable from a broken worldgen, so make

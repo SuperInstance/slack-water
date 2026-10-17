@@ -259,7 +259,18 @@ setmetatable(Enum, {
 				local key = enumType .. "." .. itemName
 				local item = enumItems[key]
 				if item == nil then
-					item = { EnumType = enumType, Name = itemName }
+					item = setmetatable({
+					EnumType = enumType,
+					Name = itemName,
+				}, {
+					-- Real Roblox enum items stringify to their member name.
+					-- Without this, tostring() yields "table: 0x..." and any
+					-- production code comparing against the name -- logging,
+					-- or a test keying off it -- silently fails.
+					__tostring = function(self: any): string
+						return self.Name
+					end,
+				})
 					enumItems[key] = item
 				end
 				return item
@@ -363,6 +374,7 @@ local CLASS_PARENTS: { [string]: string } = {
 	-- services
 	Lighting = "Instance",
 	Players = "Instance",
+	StarterGui = "Instance",
 	ReplicatedStorage = "Instance",
 	ServerScriptService = "Instance",
 	RunService = "Instance",
@@ -405,6 +417,7 @@ local CREATABLE_CLASSES: { [string]: boolean } = {
 	Clouds = true,
 	Lighting = true,
 	Players = true,
+	StarterGui = true,
 	ReplicatedStorage = true,
 	ServerScriptService = true,
 	RunService = true,
@@ -1508,6 +1521,24 @@ CLASS_SPECS["HttpService"] = {
 	methods = METHODS_HTTP,
 }
 
+-- The server quiets Roblox's default chrome at bootstrap so the HUD is not
+-- fighting the chat box and player list. Both methods record what they were
+-- asked to do so a test can assert the call actually happened.
+local METHODS_STARTER_GUI = mergeMethods(METHODS_BASE, {
+	SetCoreGuiEnabled = function(self: any, coreType: any, enabled: any): ()
+		if enabled == false then
+			table.insert(self.__coreGuiDisabled, tostring(coreType))
+		end
+	end,
+	SetCore = function(self: any, name: string, enabled: any): ()
+		self.__coreSettings[name] = enabled
+	end,
+})
+
+CLASS_SPECS["StarterGui"] = {
+	methods = METHODS_STARTER_GUI,
+}
+
 CLASS_SPECS["DataStoreService"] = {
 	methods = METHODS_DATASTORE,
 }
@@ -1555,6 +1586,14 @@ function Roblox.new(): any
 	local httpService = makeInstance("HttpService")
 	httpService.Name = "HttpService"
 
+	-- StarterGui exists purely so the server's chrome-quieting path can be
+	-- executed for real. Both methods record what they were asked to do, so a
+	-- test can assert the HUD is not fighting Roblox's own UI.
+	local starterGui = makeInstance("StarterGui")
+	starterGui.Name = "StarterGui"
+	starterGui.__coreGuiDisabled = {}
+	starterGui.__coreSettings = {}
+
 	local services = {
 		Workspace = workspace,
 		ReplicatedStorage = replicatedStorage,
@@ -1564,6 +1603,7 @@ function Roblox.new(): any
 		RunService = runService,
 		DataStoreService = dataStoreService,
 		HttpService = httpService,
+		StarterGui = starterGui,
 	}
 
 	local gameImpl = { __closeCallbacks = {} }

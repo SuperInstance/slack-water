@@ -318,6 +318,26 @@ suite("worldgen — a player can stand in this world", function()
 		end
 	end)
 
+test("Roblox's own chrome is silenced so it cannot sit on the HUD", function()
+	-- The chat box lands on the tide strip, the player list on the region
+	-- panel and the mobile jump button on the cast bar. Every one of those was
+	-- visible in a real session. This belongs to bootstrap, not to a panel.
+	local starterGui: any = roblox.services.StarterGui
+	local disabled = starterGui.__coreGuiDisabled
+	assertTrue(#disabled > 0, "no core GUI was disabled — Roblox chrome is still on screen")
+
+	local seen = {}
+	for _, name in disabled do
+		seen[name] = true
+	end
+	for _, required in { "Chat", "PlayerList", "Health", "Backpack" } do
+		assertTrue(
+			seen[required] == true,
+			required .. " was left enabled and will overlap the HUD"
+		)
+	end
+end)
+
 test("the default baseplate is gone", function()
 		-- which is exactly where the tide sits. Left in place it renders as a
 		-- checkered floor across the sea and hides the water entirely. This was
