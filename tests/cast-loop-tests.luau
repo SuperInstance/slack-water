@@ -749,6 +749,8 @@ else
 		ApplyStrokeMode = { Border = "Border" },
 		UserInputType = { Touch = "Touch", MouseButton1 = "MouseButton1" },
 		KeyCode = { Space = "Space" },
+		EasingStyle = { Quad = "Quad" },
+		EasingDirection = { Out = "Out" },
 	}
 
 	-- pre-declared: the table's own methods close over it (a `local x = { f =
@@ -819,11 +821,28 @@ else
 	local userInputService = { InputBegan = inputBegan, InputEnded = inputEnded }
 	local heartbeat = newSignal("RunService.Heartbeat")
 
+	-- Tweens in this engine land immediately: every use in the client tree is a
+	-- short decorative pop (Ui.tween), and nothing under test asserts on the
+	-- interpolation. What matters is that the goal ends up on the instance, so
+	-- a panel that animates its own scale still measures the right scale.
+	local tweenService = {}
+	function tweenService:Create(inst: any, _info: any, goal: { [string]: any }): any
+		local tween = {}
+		function tween:Play()
+			for key, value in goal do
+				inst[key] = value
+			end
+		end
+		function tween:Cancel() end
+		return tween
+	end
+
 	local services = {
 		Players = { LocalPlayer = player },
 		ReplicatedStorage = replicatedStorage,
 		RunService = { Heartbeat = heartbeat },
 		UserInputService = userInputService,
+		TweenService = tweenService,
 	}
 	local mockGame = {}
 	function mockGame:GetService(name: string): any
@@ -870,7 +889,17 @@ else
 			end
 			parent = folder
 		end
-		local node = newInstance("ModuleScript")
+		-- Rojo maps by filename: `.client.luau` is a LocalScript and
+		-- `.server.luau` a Script; only a bare `.luau` is a ModuleScript. The
+		-- fake engine used to hand every source out as a ModuleScript, which
+		-- quietly made `require(Casting.client)` succeed here while Roblox
+		-- refuses it at runtime — a harness that lies about the one thing the
+		-- source of truth cares about.
+		local className = if string.sub(path, -12) == ".client.luau"
+			then "LocalScript"
+			elseif string.sub(path, -12) == ".server.luau" then "Script"
+			else "ModuleScript"
+		local node = newInstance(className)
 		node.Name = segments[#segments]
 		rawset(node, "__path", path)
 		node.Parent = parent
@@ -921,15 +950,34 @@ else
 			setmetatable({
 				script = nodeFor(modulePath),
 				require = function(ref: any)
+					local resolved: string
 					if type(ref) == "table" and rawget(ref, "__path") ~= nil then
-						return loadModule(rawget(ref, "__path") :: string)
+						resolved = rawget(ref, "__path") :: string
 					elseif type(ref) == "string" then
-						return loadModule(resolveRelative(modulePath, ref))
+						resolved = resolveRelative(modulePath, ref)
+					else
+						error(
+							"client harness require: expected a module instance or a relative path",
+							0
+						)
 					end
-					error(
-						"client harness require: expected a module instance or a relative path",
-						0
-					)
+					-- Roblox refuses to require anything that is not a
+					-- ModuleScript. A sibling LocalScript is the mistake this
+					-- project has already made once (docs/CASTING.md, defect
+					-- 1), so the harness says no instead of papering over it.
+					local node = nodeFor(resolved)
+					local className = rawget(node, "__class")
+					if className ~= "ModuleScript" then
+						error(
+							"client harness require: Roblox refuses to require a "
+								.. tostring(className)
+								.. " ("
+								.. resolved
+								.. ") — sibling LocalScripts talk over the PlayerGui bus",
+							0
+						)
+					end
+					return loadModule(resolved)
 				end,
 				game = mockGame,
 				Instance = { new = newInstance },
@@ -953,6 +1001,15 @@ else
 					end,
 				},
 				Enum = mockEnum,
+				TweenInfo = {
+					new = function(
+						_seconds: number,
+						_style: any,
+						_direction: any
+					)
+						return { __class = "TweenInfo" }
+					end,
+				},
 				task = mockTask,
 				print = print,
 				warn = warn,
@@ -1011,6 +1068,11 @@ else
 
 			loadModule("src/Client/CastBar.client.luau")
 			loadModule("src/Client/HUD.client.luau")
+			-- CatchCard is in the loop too, and loading it here is the point:
+			-- the harness refuses to let a sibling LocalScript be required, so a
+			-- card that reaches for Casting directly fails here instead of at
+			-- runtime, where the whole panel would fail to load.
+			loadModule("src/Client/CatchCard.client.luau")
 
 			castBarGui = playerGui:FindFirstChild("SlackWaterCastBar")
 			hudGui = playerGui:FindFirstChild("SlackWaterHUD")
@@ -1257,6 +1319,147 @@ else
 			assertEq(castingInst.state, "fighting", "the timeout must not lock the verb")
 			local giveUp = findDescendant(castBarGui, byName("GiveUp"))
 			giveUp.__signals.Activated:Fire()
+		end)
+
+		-- -------------------------------------------------------------------
+		-- A result that arrives for a cast the player has walked away from.
+		--
+		-- The server has no idea the player gave up: a request it already
+		-- accepted is still going to be answered. Whether that answer is
+		-- allowed to do anything is entirely the client's problem, and it is
+		-- the one problem three different scripts were each solving separately.
+		-- -------------------------------------------------------------------
+
+		local function fightToLanding(): ()
+			local castButton = findDescendant(castBarGui, byName("Cast"))
+			castButton.__signals.Activated:Fire()
+			assertEq(castingInst.state, "fighting", "the cast must start")
+
+			local held = false
+			local steps = 0
+			while castingInst.state == "fighting" and steps < 4000 do
+				local wantHold = castingInst.tension < 70
+				if wantHold ~= held then
+					held = wantHold
+					if held then
+						inputBegan:Fire({ UserInputType = mockEnum.UserInputType.Touch })
+					else
+						inputEnded:Fire({ UserInputType = mockEnum.UserInputType.Touch })
+					end
+				end
+				heartbeat:Fire(0.05)
+				steps += 1
+			end
+			assertEq(castingInst.state, "waiting", "the fight must reach the server round trip")
+		end
+
+		local function giveUpNow(): ()
+			local giveUp = findDescendant(castBarGui, byName("GiveUp"))
+			assertTrue(giveUp ~= nil, "the give-up control is on screen while a cast is out")
+			giveUp.__signals.Activated:Fire()
+		end
+
+		local LATE_RESULT = {
+			ok = true,
+			speciesId = "rockfish",
+			regionId = "r1",
+			yielded = 3,
+			remaining = 297,
+			abundanceBefore = 0.6,
+			abundanceAfter = 0.59,
+			depleted = false,
+			contested = false,
+			weightKg = 4.2,
+			value = 123,
+			rare = false,
+			inRun = false,
+			tideQuality = 0.9,
+		}
+
+		local function hudSessionText(): string?
+			local label = findDescendant(hudGui, function(inst)
+				return inst.__class == "TextLabel"
+					and type(inst.Text) == "string"
+					and string.find(inst.Text, "fish ·", 1, true) ~= nil
+			end)
+			return if label then label.Text else nil
+		end
+
+		local function pump(): ()
+			for _ = 1, 6 do
+				heartbeat:Fire(0.3)
+			end
+		end
+
+		test("a result that lands after the player gave up is dropped", function()
+			pump()
+			local before = hudSessionText()
+
+			fightToLanding()
+			giveUpNow()
+			assertEq(castingInst.state, "idle", "giving up from waiting returns to idle")
+
+			castResultRemote.__signals.OnClientEvent:Fire(LATE_RESULT)
+			pump()
+
+			assertEq(
+				castingInst.state,
+				"idle",
+				"a result for an abandoned cast must not resurrect it"
+			)
+			assertEq(
+				hudSessionText(),
+				before,
+				"an abandoned catch must not be counted in the session total"
+			)
+		end)
+
+		test("a late result cannot hijack the next fight", function()
+			-- this is the one that bites in play: the player lands a fish, gets
+			-- bored, casts again, and the *first* cast's answer lands mid-fight
+			-- and ends the second one for them.
+			fightToLanding()
+			giveUpNow()
+
+			local castButton = findDescendant(castBarGui, byName("Cast"))
+			castButton.__signals.Activated:Fire()
+			assertEq(castingInst.state, "fighting", "a fresh cast is running")
+			pump()
+			local before = hudSessionText()
+
+			castResultRemote.__signals.OnClientEvent:Fire(LATE_RESULT)
+			pump()
+
+			assertEq(
+				castingInst.state,
+				"fighting",
+				"a previous cast's result must not end the cast in progress"
+			)
+			assertEq(castingInst.tension, 0, "and must not touch the live fight at all")
+			assertEq(
+				hudSessionText(),
+				before,
+				"nor be counted as a fish the player landed"
+			)
+
+			giveUpNow()
+		end)
+
+		test("a result for the cast in flight still works after both", function()
+			pump()
+			local before = hudSessionText()
+
+			fightToLanding()
+			castResultRemote.__signals.OnClientEvent:Fire(LATE_RESULT)
+			pump()
+
+			assertEq(castingInst.state, "landed", "the live cast's own result is still honoured")
+			local after = hudSessionText()
+			assertTrue(after ~= nil, "a real catch is counted in the session total")
+			assertTrue(
+				after ~= before,
+				"and the session total actually moved, got: " .. tostring(after)
+			)
 		end)
 	end)
 end

@@ -630,6 +630,7 @@ local function main(): ()
 		if typeof(payload) ~= "table" then
 			return
 		end
+
 		local p = payload :: Types.CastResultPayload
 		if p.ok == true then
 			showCatch(p)
@@ -667,11 +668,20 @@ local function main(): ()
 		end
 	end
 
+	-- Casting owns the CastResult remote and checks the answer against the cast
+	-- it belongs to before anyone else hears about it, so the card listens to
+	-- that checked answer rather than the wire. This is a LocalScript sibling
+	-- and LocalScripts cannot require each other, which is why this is a bus
+	-- message and not a call (docs/CASTING.md, defect 1).
 	task.spawn(function()
 		for _ = 1, 15 do
-			local castResult = Ui.awaitRemote(Types.REMOTE_FOLDER, Types.CastResult, 10)
-			if castResult then
-				Ui.connect(connections, castResult.OnClientEvent, onCastResult)
+			local bus = playerGui:WaitForChild("SlackWaterCastBus", 10)
+			if bus and bus:IsA("BindableEvent") then
+				Ui.connect(connections, (bus :: BindableEvent).Event, function(msg: any)
+					if typeof(msg) == "table" and msg.kind == "fight" and msg.event == "result" then
+						onCastResult(msg.data)
+					end
+				end)
 				break
 			end
 			task.wait(2)

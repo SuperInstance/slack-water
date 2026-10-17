@@ -26,7 +26,8 @@ echo "########## tests/cast-loop-tests.luau (with client sources fed in) #######
 cast_args=()
 for f in src/Client/Ui.luau src/Client/CastBar.client.luau src/Client/Casting.client.luau \
   src/Client/HUD.client.luau src/Shared/Types.luau src/Shared/Species.luau \
-  src/Shared/Config.luau src/Shared/Tide.luau; do
+  src/Shared/Config.luau src/Shared/Tide.luau \
+  src/Client/CatchCard.client.luau; do
   cast_args+=("$f" "$(cat "$f")")
 done
 if luau tests/cast-loop-tests.luau -a "${cast_args[@]}"; then

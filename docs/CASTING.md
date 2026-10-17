@@ -50,10 +50,24 @@ by every listener — additions are backward-safe.
 | CastBar → Casting | `"abort"` | `{ kind }` | Reel in / give up. From `"fighting"` it is a lost fight; from `"waiting"` it cancels the resolve. |
 | CastBar → HUD | `"selection"` | `{ kind, regionId: string?, regionName: string? }` | The ground the player rigged for. HUD renders `bound for <name>` until a CastResult says where they actually are. |
 | Casting → CastBar | `"fight"` | `{ kind, event: string, data: any }` | A forwarded minigame event. `event` is one of `begin`, `update`, `landed`, `lost`, `result`, `cancel`, plus `error` for intents that never became a fight. |
+| Casting → HUD | `"fight"` / `"result"` | `{ kind, event, data }` | The server's answer to the cast in flight. HUD adds `data.value` to the session total. |
+| Casting → CatchCard | `"fight"` / `"result"` | `{ kind, event, data }` | Same payload, verbatim. CatchCard renders the card. |
 
 The `"update"` event fires every Heartbeat during a fight and carries
 `Casting.snapshot` (tension01, progress, stamina, inBand…). `"result"`
 carries the server's `CastResultPayload` verbatim.
+
+**Casting owns the `CastResult` remote. Nobody else listens to it.** HUD and
+CatchCard used to subscribe to the wire themselves, which was wrong twice
+over: Roblox fires handlers in connection order and Casting unsubscribes
+after each reply, so from the *second* cast onward both listeners ran before
+the staleness check they were relying on; and three subscribers meant three
+copies of "is this still relevant", only one of which had an answer. The
+answer is now computed once, in `Casting._resolveOnServer`, against a
+generation counter that increments when a cast **begins** and when it is
+**abandoned** — so a reply for a cast that has been replaced or reeled in is
+dropped before anyone else hears it. If you are adding a third consumer, take
+it from the bus, not the remote.
 
 ## The loop, step by step
 
@@ -71,8 +85,10 @@ carries the server's `CastResultPayload` verbatim.
    catch progress, stamina.
 5. **Resolve.** On a win, Casting fires `CastRequest` with
    `{ regionId, speciesId, effort = 0, depth, performance }` and waits on
-   `CastResult`. CatchCard renders the outcome; CastBar echoes the value (or
-   the failure reason) in its status line.
+   `CastResult`. Casting checks the reply against the cast's generation and
+   republishes it as `"result"`; CatchCard renders the card and the HUD adds
+   to the session total, CastBar echoes the value (or the failure reason) in
+   its status line.
 6. **Again.** The guard releases on result/loss/cancel/timeout; the button
    shows a countdown only while the server's cooldown would actually refuse
    a request.
@@ -188,11 +204,12 @@ anyone who trusted it. The gate was fine. The coastline was wrong.
   scoring (which the server clamps). If the server should ever arbitrate
   depth, `Types.CastRequestPayload.depth` is the place, and CastBar's picker
   already sends honest numbers.
-- Late `CastResult` after an abandoned resolve: Casting's per-cast token
-  ignores it, but CatchCard (which listens to the remote directly) would
-  still show the fish. The 2 s server cooldown makes this window small; it
-  is documented here rather than fixed, because CatchCard is another pass's
-  file.
+- Late `CastResult` after an abandoned resolve used to show a card for a
+  fish the player had reeled in, and — worse — land on top of whatever cast
+  was running now and end it. Fixed: the generation counter moves when a cast
+  begins and when it is cancelled, and Casting is the only listener on the
+  remote. Three tests in `tests/cast-loop-tests.luau` pin it, including the
+  case where the live cast's own result must still work.
 
 ## What is verified, and how
 

@@ -196,9 +196,12 @@ matter first, in order):
   flag can show it today. Again a server gap, not a panel one.
 - **`run` and `market` toasts never fire** — no server code sends those
   Notify kinds (only contest/scarcity from CastService).
-- **A late CastResult after an abandoned resolve still shows its card**
-  (CatchCard listens to the remote directly; Casting's token ignores the
-  stale reply, but the card has no token). Small window, other owner's file.
+- **A late CastResult after an abandoned resolve** used to show its card
+  (CatchCard listened to the remote directly; Casting's token ignored the
+  stale reply, but the card had no token). Fixed: Casting is now the only
+  listener on `CastResult` and republishes the checked answer on the bus —
+  see the "Casting owns the CastResult remote" note in `docs/CASTING.md`.
+  A third consumer must take it from the bus, not the remote.
 - Icons are emoji by choice: zero asset dependencies while the layout is
   being proven (the art language is placeholder project-wide, see the root
   README).

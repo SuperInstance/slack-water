@@ -187,17 +187,23 @@ local function main(): ()
 		end
 	end
 
-	-- The CastBar publishes the ground the player has rigged for; until the
-	-- first cast says where they actually are, the honest answer is where
-	-- they are headed. (CastBar -> HUD traffic on the bus Casting publishes;
-	-- see docs/CASTING.md.)
+	-- Two sources of truth arrive on the same bus: the ground the player has
+	-- rigged for (CastBar -> HUD) and the outcome of the cast in flight
+	-- (Casting -> HUD, already checked against the cast it belongs to).
+	-- The HUD deliberately does not subscribe to the CastResult remote itself
+	-- — see Casting._resolveOnServer for why a second listener cannot tell a
+	-- live result from a dead one, and would add to it either way.
 	task.spawn(function()
 		local bus = playerGui:WaitForChild("SlackWaterCastBus", 10)
-		if bus and bus:IsA("BindableEvent") then
-			Ui.connect(connections, (bus :: BindableEvent).Event, function(msg: any)
-				if typeof(msg) ~= "table" or msg.kind ~= "selection" then
-					return
-				end
+		if not (bus and bus:IsA("BindableEvent")) then
+			return
+		end
+		Ui.connect(connections, (bus :: BindableEvent).Event, function(msg: any)
+			if typeof(msg) ~= "table" then
+				return
+			end
+
+			if msg.kind == "selection" then
 				if type(msg.regionId) == "string" and msg.regionId ~= "" then
 					currentRegionId = msg.regionId
 					regionPlanned = true
@@ -205,8 +211,10 @@ local function main(): ()
 						regionNames[msg.regionId] = msg.regionName
 					end
 				end
-			end)
-		end
+			elseif msg.kind == "fight" and msg.event == "result" then
+				onCastResult(msg.data)
+			end
+		end)
 	end)
 
 	-- Remotes appear when the server builds them. Retry gently instead of
@@ -217,16 +225,6 @@ local function main(): ()
 			local oceanSync = Ui.awaitRemote(Types.REMOTE_FOLDER, Types.OceanSync, 10)
 			if oceanSync then
 				Ui.connect(connections, oceanSync.OnClientEvent, onOceanSync)
-				break
-			end
-			task.wait(2)
-		end
-	end)
-	task.spawn(function()
-		for _ = 1, 15 do
-			local castResult = Ui.awaitRemote(Types.REMOTE_FOLDER, Types.CastResult, 10)
-			if castResult then
-				Ui.connect(connections, castResult.OnClientEvent, onCastResult)
 				break
 			end
 			task.wait(2)

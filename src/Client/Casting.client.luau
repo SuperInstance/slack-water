@@ -313,6 +313,11 @@ function Casting.beginFight(
 	casting.state = "fighting"
 	casting.performance = Casting.depthQuality(casting)
 
+	-- Opening a new cast is what retires the last one. A result the server is
+	-- still holding for a cast the player walked away from is about to arrive,
+	-- and it must not be allowed to land on whatever the player is doing now.
+	casting._castToken += 1
+
 	local d = species.harvestDifficulty
 	casting.stamina = FIGHT.baseStamina + FIGHT.staminaPerDifficulty * (d - 1)
 	casting._pull = FIGHT.pullPerDifficulty * (d - 1)
@@ -431,6 +436,11 @@ function Casting.lose(casting: Casting, reason: string): ()
 end
 
 function Casting.cancel(casting: Casting): ()
+	-- Abandoning a cast has to retire its generation, or the result the server
+	-- is still holding arrives a moment later and lands anyway — popping a card
+	-- for a fish the player gave up and writing it into the session total.
+	casting._castToken += 1
+
 	if casting.state == "fighting" then
 		Casting.lose(casting, "You reeled in.")
 		return
@@ -453,13 +463,31 @@ local RESOLVE_TIMEOUT = 12
 ---
 --- Deliberately fire-and-await rather than optimistic: the client has no idea
 --- what the shared ocean was worth a moment ago, and guessing would be a lie.
+---
+--- Casting is the *only* thing in the client that listens to the CastResult
+--- remote. Everything else wants the answer — the card, the session total —
+--- and every one of them used to subscribe to the raw remote and make up its
+--- own mind about whether the result was still relevant. Two problems, both
+--- real:
+---
+---   * Roblox fires handlers in connection order, and Casting unsubscribes
+---     after each reply, so from the second cast onward everyone else's
+---     handler ran *first* — before the token check that decides the answer
+---     is even addressed to a live cast. The check was downstream of the
+---     consumers it existed to protect.
+---   * Three subscriptions meant three copies of "is this stale?" to keep in
+---     step, and only one of them had one.
+---
+--- So the reply is validated exactly once, here, and then republished on the
+--- bus the sibling LocalScripts already use. Anyone who wants the outcome
+--- wants the outcome of the cast in flight, not of whichever cast it used to
+--- be.
 function Casting._resolveOnServer(casting: Casting, performance: number): ()
 	if casting.state ~= "fighting" and casting.state ~= "lost" then
 		return
 	end
 
 	casting.state = "waiting"
-	casting._castToken += 1
 	local token = casting._castToken
 
 	local remotes = ReplicatedStorage:WaitForChild(Types.REMOTE_FOLDER)
@@ -468,7 +496,7 @@ function Casting._resolveOnServer(casting: Casting, performance: number): ()
 
 	local function onResult(payload: any)
 		if token ~= casting._castToken then
-			return -- a stale reply from an abandoned cast
+			return -- a reply for a cast that has since been replaced or abandoned
 		end
 
 		if typeof(payload) ~= "table" then
