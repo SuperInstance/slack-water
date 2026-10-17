@@ -385,6 +385,11 @@ in which a new developer should attack the remainder. The summary is short —
 the simulation is real and tested, the cast loop has never been played, and the
 AI composer was dead until recently and has still never run inside the game.
 
+[`docs/ROADMAP.md`](docs/ROADMAP.md) is the forward-looking version: the three
+gates everything hangs off, what to do in what order, and the rules that will
+bite you if you break them. [`docs/WORKLOG.md`](docs/WORKLOG.md) is the record
+of the most recent session, including token accounting.
+
 - The Worker is deployed and running at
   `https://slack-water.casey-digennaro.workers.dev` with a real D1 database and
   KV namespace. The live AI composer returns real banks. The game now reaches

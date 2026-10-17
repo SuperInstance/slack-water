@@ -121,22 +121,40 @@ in the project.
 
 ## Known gaps
 
-From `src/Client/README.md`, which is still the most accurate gap list:
+Kept honest: items that were open when this file was first written and have
+since been fixed are marked, not quietly deleted.
 
-- **Default Roblox chrome** (chat, player list, jump button) overlaps the HUD
-  and the cast bar. Needs `StarterGui:SetCoreGuiEnabled` at bootstrap.
+**Fixed since first written:**
+
+- ~~**Default Roblox chrome** overlaps the HUD.~~ — `Main.server.luau` now
+  disables Chat, PlayerList, Health, Backpack and EmotesMenu at bootstrap.
+  (An earlier attempt silently disabled nothing because `CoreGui` is not a
+  member of `CoreGuiType`; selene caught it before it ever reached Studio.)
+- ~~**The tide gate cannot bite.**~~ — the original diagnosis blamed the
+  species roster and was wrong. No ground could ever dry because
+  `Regions.DEPTH_RANGE` bottomed its shallowest habitat at 5 m while the
+  threshold is 3.83 m. The mechanic was unreachable for a geographical reason,
+  and estuaries now reach 1.5 m.
+- ~~**A late CastResult after an abandoned resolve still shows its card.**~~
+  — `Casting` is now the only listener on the remote and validates against a
+  generation that increments on start *and* cancel; HUD and CatchCard take the
+  outcome from the shared bus.
+
+**Still open:**
+
+- **The cast loop has never been played by a person.** This remains the
+  largest unknown in the project.
 - **Buying gear is not wired.** `Progression.buy` validates level and funds but
   there is no funds owner to deduct from. Locked rows honestly show
   "reached at level N · price X" with no buy button.
 - **`contested` always arrives empty** — GROUNDS can never show `⚔ CONTESTED`.
 - **`run` and `market` toasts never fire** — no server code sends those kinds.
-- **A late CastResult after an abandoned resolve still shows its card.**
-- **The tide gate cannot bite with current constants.** The shallowest species
-  band sits above the worst-case tide plus draught, so "WAIT FOR TIDE" is
-  display-only. See the arithmetic in `docs/CASTING.md`. The fix belongs in
-  `src/Shared`.
 - **`OceanClient.TIMEOUT = 4` is declared but never applied.** A hung request
   could stall a round. Worth fixing before the network path matters.
+- **The AI composer has still not been seen running in a live Studio session.**
+  The call shape is fixed and covered; the Worker is verified independently.
+- **Mobile has never been run in the device emulator.**
+- **Persistence has never survived a restart** — Studio runs in-memory.
 
 ---
 
@@ -228,3 +246,4 @@ surveyed data.
 | `docs/HARNESS-FIDELITY.md` | What the fake Roblox does and does not model |
 | `docs/STUDIO-AUTOMATION.md` | Driving Studio from a shell, and what fails |
 | `docs/WORKLOG.md` | This session: what was done, what it proved, and token use |
+| `docs/ROADMAP.md` | What to do next, in what order, and what to avoid breaking |
