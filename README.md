@@ -379,16 +379,25 @@ tension.
 
 ## Known gaps
 
+**Start with [`docs/STATUS.md`](docs/STATUS.md).** It is the honest state of the
+build: what has been verified and how, what has never been run, and the order
+in which a new developer should attack the remainder. The summary is short —
+the simulation is real and tested, the cast loop has never been played, and the
+AI composer was dead until recently and has still never run inside the game.
+
 - The Worker is deployed and running at
   `https://slack-water.casey-digennaro.workers.dev` with a real D1 database and
-  KV namespace. The live AI composer returns real banks. What has NOT happened
-  yet is a Roblox server actually syncing against it — that needs Studio.
+  KV namespace. The live AI composer returns real banks. The game now reaches
+  it correctly, but that has not yet been confirmed in a live Studio session.
 - No persistence layer yet — local simulation state is not saved across server
   restarts. The D1 copy is durable; the mirror is not.
-- Art is placeholder geometry. The world is built from discs and labels; the
-  visual language is meant to be replaced once the layout is proven.
+- Art is placeholder geometry. The world is built from discs, labels and a
+  low-poly shoreline; the visual language is meant to be replaced once the
+  layout is proven.
 - Balance is tuned against tests, not players. The numbers in `Config.luau` are
   a starting point and should be expected to move.
+- The cast loop has never been played by a person. Its tests run against a fake
+  engine, not Roblox.
 
 ## Licence
 
