@@ -769,18 +769,82 @@ else
 	}
 
 	local delayed: { any } = {}
+
+	-- `task.wait` has to actually suspend, the way Roblox's does.
+	--
+	-- Six of the panels run a watchdog shaped `while alive do ... task.wait() end`
+	-- that is supposed to live as long as its ScreenGui. Against a `task.wait`
+	-- that returns immediately without yielding, that is not a background task
+	-- at all — it is an infinite busy loop, and the test run pins the CPU. The
+	-- harness was not more faithful than this; it was just lucky enough that
+	-- none of the panels using it had been loaded.
+	--
+	-- So: spawn runs the body on a coroutine and parks it at its first wait.
+	-- Nothing is lost — every panel's mounting happens synchronously in main(),
+	-- before any wait — and what we gain is that a panel which spins without
+	-- ever yielding still fails loudly instead of hanging the run.
+	local parked: { thread } = {}
+
+	local function drive(co: thread, ...: any)
+		local ok, err = coroutine.resume(co, ...)
+		if not ok then
+			error("client harness: a spawned task died: " .. tostring(err), 0)
+		end
+		if coroutine.status(co) == "suspended" then
+			table.insert(parked, co)
+		end
+	end
+
+	-- Give every parked task `passes` turns, one resume each. A task that
+	-- yields again just parks and waits for the next pump, which is what
+	-- Roblox does with it.
+	--
+	-- What this cannot do is catch a body that never yields at all: that one
+	-- hangs inside `coroutine.resume`, before any budget here could apply.
+	-- Worth stating plainly rather than implying a safety net that is not
+	-- there. It is still a large improvement on the old `task.wait`, which
+	-- manufactured exactly such a spin out of correct product code.
+	local function resumeParked(passes: number)
+		for _ = 1, passes do
+			if #parked == 0 then
+				return
+			end
+			local queue = parked
+			parked = {}
+			for _, co in queue do
+				if coroutine.status(co) == "suspended" then
+					local ok, err = coroutine.resume(co)
+					if not ok then
+						error("client harness: a background task died: " .. tostring(err), 0)
+					end
+					if coroutine.status(co) == "suspended" then
+						table.insert(parked, co)
+					end
+				end
+			end
+		end
+	end
+
 	local mockTask = {
 		spawn = function(fn: any, ...: any)
-			fn(...)
+			drive(coroutine.create(fn), ...)
 		end,
 		wait = function()
+			-- outside a coroutine (a top-level wait in a module) there is
+			-- nothing to suspend, so keep the old non-blocking behaviour
+			if coroutine.running() == nil then
+				return 0
+			end
+			coroutine.yield()
 			return 0
 		end,
 		defer = function(fn: any, ...: any)
-			fn(...)
+			drive(coroutine.create(fn), ...)
 		end,
 		delay = function(_seconds: number, fn: any)
-			table.insert(delayed, fn)
+			table.insert(delayed, function()
+				drive(coroutine.create(fn))
+			end)
 		end,
 	}
 	local function flushDelayed()
@@ -1088,6 +1152,28 @@ else
 			loadedConfig.CAST_COOLDOWN = 0
 		end)
 
+		test("every panel boots and mounts its ScreenGui", function()
+			-- A LocalScript that throws at load takes its panel down with it and
+			-- nobody notices: there is no error the player can see. Six of the
+			-- eight panels had never been executed by anything until now, which
+			-- is exactly how `require` of a sibling LocalScript survived in
+			-- CatchCard for a week.
+			for _, panel in {
+				{ path = "src/Client/GearBar.client.luau", gui = "SlackWaterGear" },
+				{ path = "src/Client/MarketPanel.client.luau", gui = "SlackWaterMarket" },
+				{ path = "src/Client/Notify.client.luau", gui = "SlackWaterNotify" },
+				{ path = "src/Client/RegionChart.client.luau", gui = "SlackWaterGrounds" },
+				{ path = "src/Client/TideStrip.client.luau", gui = "SlackWaterTideStrip" },
+			} do
+				local ok, err = pcall(loadModule, panel.path)
+				assertTrue(ok, panel.path .. " must load: " .. tostring(err))
+				assertTrue(
+					playerGui:FindFirstChild(panel.gui) ~= nil,
+					panel.path .. " must mount a " .. panel.gui
+				)
+			end
+		end)
+
 		test("an OceanSync populates the rig sheet through the real remote path", function()
 			oceanSyncRemote.__signals.OnClientEvent:Fire({
 				month = 1,
@@ -1389,6 +1475,7 @@ else
 			for _ = 1, 6 do
 				heartbeat:Fire(0.3)
 			end
+			resumeParked(64)
 		end
 
 		test("a result that lands after the player gave up is dropped", function()
