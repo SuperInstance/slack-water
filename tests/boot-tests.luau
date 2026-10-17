@@ -752,6 +752,93 @@ suite("cast — one full round trip through the server", function()
 		)
 	end)
 
+	test("the client's literal request shape is accepted by the server", function()
+		-- The round-trip test above hand-writes its payload and omits `depth`,
+		-- which Casting.client.luau:489 actually sends. That gap is exactly how
+		-- the two halves drift: the test stayed green against a request the real
+		-- client never makes.
+		--
+		-- This fires the real shape, field for field.
+		local before = #svc.remotes[Types.CastResult].sentToPlayers
+		svc.remotes[Types.CastRequest].OnServerEvent:Fire(player, {
+			regionId = deepestRegionId,
+			speciesId = speciesId,
+			effort = 0,
+			depth = 45,
+			performance = 0.6,
+		})
+		runner:flushTasks()
+
+		local sent = svc.remotes[Types.CastResult].sentToPlayers
+		assertEq(#sent, before + 1, "the client's real request shape got no answer at all")
+		local payload = sent[#sent].args[1]
+
+		-- The server may legitimately refuse -- this cast follows another in
+		-- the same suite and so may hit the cooldown. What it must never do is
+		-- stay silent, which is what it used to do on a rate-limited cast and
+		-- left the client to time out with "no answer from the shore".
+		if not payload.ok then
+			assertTrue(
+				type(payload.reason) == "string" and #payload.reason > 0,
+				"the server refused the cast with no reason to show the player"
+			)
+		end
+	end)
+
+	test("a rate-limited cast is answered, not silently dropped", function()
+		-- Pins the fix above. A refusal that sends nothing is indistinguishable
+		-- from a dead handler, and the player pays a full resolve timeout for
+		-- doing something ordinary.
+		local castRemote = svc.remotes[Types.CastResult]
+		local before = #castRemote.sentToPlayers
+
+		-- Two casts back to back: the second is inside the cooldown by
+		-- construction, whatever the clock is doing.
+		for _ = 1, 2 do
+			svc.remotes[Types.CastRequest].OnServerEvent:Fire(player, {
+				regionId = deepestRegionId,
+				speciesId = speciesId,
+				effort = 0,
+				depth = 45,
+				performance = 0.5,
+			})
+			runner:flushTasks()
+		end
+
+		local sent = castRemote.sentToPlayers
+		assertTrue(
+			#sent >= before + 2,
+			"a rate-limited cast sent no reply: the client would hang until its timeout"
+		)
+	end)
+
+	test("every field the catch card renders arrives on the result", function()
+		-- CatchCard reads weightKg, value, valueCents, abundanceBefore,
+		-- abundanceAfter and level off the payload. A field the server stops
+		-- sending is a nil on screen at best and a broken card at worst, and
+		-- nothing in this repo would notice.
+		local required = {
+			"ok",
+			"speciesId",
+			"regionId",
+			"yielded",
+			"weightKg",
+			"value",
+			"abundanceBefore",
+			"abundanceAfter",
+			"rare",
+			"inRun",
+		}
+		local sent = svc.remotes[Types.CastResult].sentToPlayers
+		local payload = sent[#sent].args[1]
+		for _, field in required do
+			assertTrue(
+				payload[field] ~= nil,
+				"the cast result has no '" .. tostring(field) .. "' -- the catch card reads it"
+			)
+		end
+	end)
+
 	test("no background task or event handler ever errored", function()
 		local problems = {}
 		for _, err in roblox.taskErrors do

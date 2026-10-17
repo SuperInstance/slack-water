@@ -93,6 +93,27 @@ function CastService.start(): ()
 		local speciesId = payload.speciesId
 
 		if isRateLimited(player) then
+			-- This used to return in silence. Casting again promptly is an
+			-- ordinary thing for a player to do, and a silent drop left the
+			-- client waiting out its resolve timeout before reporting "no
+			-- answer from the shore" -- which reads as the game being broken
+			-- rather than as "wait a moment". Every other refusal here already
+			-- answers; this one now does too.
+			remotes[Types.CastResult]:FireClient(player, {
+				ok = false,
+				reason = "The line is still coming in. Give it a moment before casting again.",
+				speciesId = tostring(speciesId),
+				regionId = tostring(regionId),
+				yielded = 0,
+				remaining = 0,
+				abundanceBefore = 0,
+				abundanceAfter = 0,
+				value = 0,
+				weightKg = 0,
+				rare = false,
+				inRun = false,
+				rateLimited = true,
+			})
 			return
 		end
 
