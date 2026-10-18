@@ -1202,6 +1202,61 @@ suite("composition is deferred, not inline", function()
 	end)
 end)
 
+suite("the contested signal actually reaches the client", function()
+	test("a worked ground is flagged contested in OceanSync", function()
+		-- The map was hardcoded `{}` for the whole life of the project, so the
+		-- GROUNDS panel could never show ⚔ CONTESTED. Config calls this the
+		-- game's social-pressure signal; it existed only on a catch card.
+		local regionId = ocean.order[1]
+		local caps = ocean.capacity[regionId]
+
+		local function broadcastRegion(): any
+			local remote = svc.remotes[Types.OceanSync]
+			local n = #remote.sentToAll
+			OceanService.broadcastOcean(svc)
+			local payload = remote.sentToAll[n + 1][1]
+			for _, r in payload.regions do
+				if r.id == regionId then
+					return r
+				end
+			end
+			return nil
+		end
+
+		ocean.harvestedThisWindow[regionId] = 0.0
+		local quiet = broadcastRegion()
+		assertTrue(quiet ~= nil, "the region was missing from OceanSync")
+		assertEq(
+			next(quiet.contested) == nil,
+			true,
+			"an untouched ground is flagged contested"
+		)
+
+		-- Take more of one species than the contest threshold allows, which is
+		-- exactly what another crew landing on the same water would do.
+		local speciesId, cap
+		for id, k in caps do
+			if k > 0 then
+				speciesId, cap = id, k
+				break
+			end
+		end
+		assertTrue(cap ~= nil, "no species with capacity on " .. tostring(regionId))
+
+		ocean.harvestedThisWindow[regionId] = cap * Config.CONTEST_THRESHOLD * 2
+
+		local worked = broadcastRegion()
+		assertTrue(worked ~= nil, "the region went missing from OceanSync")
+		assertTrue(
+			worked.contested[speciesId] == true,
+			"a ground with " .. tostring(cap * Config.CONTEST_THRESHOLD * 2)
+				.. " kg taken this window is not flagged contested for " .. tostring(speciesId)
+		)
+
+		ocean.harvestedThisWindow[regionId] = 0.0
+	end)
+end)
+
 --=============================================================================
 -- Summary
 --=============================================================================

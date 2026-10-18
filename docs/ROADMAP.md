@@ -105,9 +105,9 @@ never been opened.
    cosmetically. Roblox cannot cancel an in-flight `RequestAsync`, so no client
    timeout is possible. `advanceCalendar` now defers the compose round, which is
    the protection that actually works.
-6. **Check `contested` end to end.** `broadcastOcean` always sends `{}`, so
-   GROUNDS can never show `⚔ CONTESTED`. Either populate it or stop pretending
-   the field exists.
+6. ~~**Check `contested` end to end.**~~ — resolved by populating it. The
+   GROUNDS panel can now show `⚔ CONTESTED` from a real signal. Still worth a
+   human eye: the flag has never been seen on screen.
 7. ~~Abandoned-cast race~~ — already fixed. `Casting` is now the only listener
    on the remote and validates against a generation that increments on start
    and on cancel.

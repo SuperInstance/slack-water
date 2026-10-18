@@ -467,6 +467,32 @@ function Service.broadcastOcean(svc: Service): ()
 			local chartedDepth = if sounding then sounding.chartedDepth else region.depth
 			local accessible, waterDepth = Tide.accessAt(chartedDepth, svc.hour)
 
+			-- Whether another crew is already working this ground.
+			--
+			-- This is the game's social-pressure signal, and it is supposed to be
+			-- honest information rather than a theft minigame: one crew learns
+			-- another was just here and decides for itself whether to go elsewhere.
+			--
+			-- The rule is the one OceanSim.harvest already applies to a single
+			-- catch -- more than CONTEST_THRESHOLD of a species' capacity taken in
+			-- this window -- asked of every species on the ground. This map was
+			-- hardcoded `{}` for the whole life of the project, so the GROUNDS
+			-- panel could never once show ⚔ CONTESTED and the only place the flag
+			-- ever surfaced was a catch card.
+			local contested: { [string]: boolean } = {}
+			local harvested = svc.ocean.harvestedThisWindow[regionId] or 0.0
+			if harvested > 0 then
+				local caps = svc.ocean.capacity[regionId]
+				if caps then
+					for _, species in Species.list do
+						local cap = caps[species.id]
+						if cap and cap > 0 and harvested > cap * Config.CONTEST_THRESHOLD then
+							contested[species.id] = true
+						end
+					end
+				end
+			end
+
 			table.insert(regions, {
 				id = region.id,
 				name = region.name,
@@ -474,7 +500,7 @@ function Service.broadcastOcean(svc: Service): ()
 				depth = region.depth,
 				chartedDepth = chartedDepth,
 				abundances = abundances,
-				contested = {},
+				contested = contested,
 				species = present,
 				accessible = accessible,
 				waterDepth = waterDepth,

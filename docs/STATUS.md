@@ -147,7 +147,11 @@ since been fixed are marked, not quietly deleted.
 - **Buying gear is not wired.** `Progression.buy` validates level and funds but
   there is no funds owner to deduct from. Locked rows honestly show
   "reached at level N · price X" with no buy button.
-- **`contested` always arrives empty** — GROUNDS can never show `⚔ CONTESTED`.
+- ~~**`contested` always arrives empty.**~~ — `broadcastOcean` hardcoded `{}`,
+  so GROUNDS could never show `⚔ CONTESTED` and the flag existed only on a catch
+  card. It now applies the same rule `OceanSim.harvest` uses per catch — more
+  than `CONTEST_THRESHOLD` of a species' capacity taken this window — to every
+  species on the ground.
 - **`run` and `market` toasts never fire** — no server code sends those kinds.
 - ~~**`OceanClient.TIMEOUT` is declared but never applied.**~~ — the comment
   now says plainly what it is and is not: Roblox exposes no way to cancel an
