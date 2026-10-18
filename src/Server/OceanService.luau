@@ -20,6 +20,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Rng = require(Shared.Ocean.Rng)
@@ -46,6 +47,15 @@ export type Service = {
 	everSynced: boolean,
 	reconciler: any,
 	composeInFlight: boolean,
+	-- previous scarcity state per species, so a toast fires on the crossing
+	-- rather than every tick while the condition holds
+	scarceBefore: { [string]: boolean },
+	-- the month whose season was last announced
+	--
+	-- Not derivable from svc.ocean.month: ocean.day stays at 1 for an entire
+	-- in-game day, so advanceCalendar is reached on every tick across that day.
+	-- Without this the run toast would fire dozens of times a month.
+	announcedMonth: number,
 }
 
 local Service = {}
@@ -144,6 +154,8 @@ function Service.start(): Service?
 		hour = 0,
 		backendOnline = false,
 		composeInFlight = false,
+		scarceBefore = {},
+		announcedMonth = 0,
 		everSynced = false,
 		reconciler = Reconcile.new(),
 
@@ -208,12 +220,79 @@ function Service.advanceDay(svc: Service): ()
 	OceanSim.advanceDay(svc.ocean, svc.rng)
 end
 
+--- Announce the two events that used to have no server code behind them.
+---
+--- `run` and `market` were rendered by Notify and fired by nothing. Both are
+--- calendar events, so both belong here, where the month already turns.
+---
+--- Deliberately edge-triggered rather than level-triggered: a toast that repeats
+--- every tick while a condition holds teaches players to ignore toasts, and the
+--- client already stacks and caps them, which only hides the problem.
+function Service.announceSeason(svc: Service): ()
+	local month = svc.ocean.month
+	local previousMonth = if month == 1 then 12 else month - 1
+	local players = Players:GetPlayers()
+
+	if #players == 0 then
+		return
+	end
+
+	-- Once per month. advanceCalendar is reached on every tick while ocean.day
+	-- is 1, which is a whole in-game day, so the calendar turning over is the
+	-- only trustworthy edge here.
+	if svc.announcedMonth == month then
+		return
+	end
+	svc.announcedMonth = month
+
+	for _, species in Species.list do
+		if species.anadromous
+			and Species.isRunning(species, month)
+			and not Species.isRunning(species, previousMonth)
+		then
+			Service.notify(svc, players, {
+				kind = "run",
+				text = string.format("%s are running — the %d month tides.", species.displayName, month),
+				speciesId = species.id,
+			})
+		end
+	end
+
+	-- A species crossing INTO scarcity is the routing decision the market panel
+	-- exists to inform, so it is worth a line. Scarcity is sticky, so this fires
+	-- once per crossing rather than every tick.
+	for _, speciesId in svc.market.order do
+		local entry = svc.market.entries[speciesId]
+		local species = Species.get(speciesId)
+		if entry and species then
+			local nowScarce = Market.isScarce(entry)
+			local wasScarce = svc.scarceBefore[speciesId] == true
+			if nowScarce ~= wasScarce then
+				svc.scarceBefore[speciesId] = nowScarce
+				if nowScarce then
+					Service.notify(svc, players, {
+						kind = "market",
+						text = string.format(
+							"%s just went scarce — %d a kilo now.",
+							species.displayName,
+							math.floor(entry.price)
+						),
+						speciesId = speciesId,
+					})
+				end
+			end
+		end
+	end
+end
+
 --- Every tick rolls a small chance the calendar crosses into a new month, and
 --- a new month is the natural time to ask the backend for new fishing grounds.
 function Service.advanceCalendar(svc: Service)
 	if svc.ocean.day ~= 1 then
 		return
 	end
+
+	Service.announceSeason(svc)
 
 	if svc.ocean.month % COMPOSE_INTERVAL_ROUNDS == 1 then
 		-- Deliberately not inline.

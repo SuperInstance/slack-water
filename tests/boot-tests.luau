@@ -1258,6 +1258,124 @@ suite("the contested signal actually reaches the client", function()
 end)
 
 --=============================================================================
+-- Seasonal toasts
+--=============================================================================
+
+suite("the calendar says something out loud", function()
+	local function notifyKindsSince(mark: number): { [string]: number }
+		local remote = svc.remotes[Types.Notify]
+		local kinds: { [string]: number } = {}
+		for i = mark + 1, #remote.sentToPlayers do
+			local args = remote.sentToPlayers[i].args
+			local payload = args[1]
+			if type(payload) == "table" and type(payload.kind) == "string" then
+				kinds[payload.kind] = (kinds[payload.kind] or 0) + 1
+			end
+		end
+		return kinds
+	end
+
+	test("a run that begins this month is announced", function()
+		-- The `run` toast was rendered by Notify and fired by nothing at all.
+		-- Anadromy is the feature the whole calendar is built around, so this is
+		-- the day the game tells anyone about it.
+		local salmon = Species.get("chinook")
+		assertTrue(salmon ~= nil, "no chinook in the roster")
+		assertTrue(
+			salmon.runMonths ~= nil and #salmon.runMonths > 0,
+			"chinook has no run window to announce"
+		)
+		assertTrue(salmon.anadromous == true, "chinook is not flagged anadromous, so the calendar ignores it")
+
+		local savedMonth = svc.ocean.month
+		local savedDay = svc.ocean.day
+		local savedAnnounced = svc.announcedMonth
+		-- advanceCalendar announces the month the ocean is already in; it does
+		-- not turn the calendar. So the state under test is "the month just
+		-- became 3", which is exactly announcedMonth ~= 3.
+		local firstRun = salmon.runMonths[1]
+		svc.ocean.month = firstRun
+		-- advanceCalendar only reaches the calendar on day 1 of a month
+		svc.ocean.day = 1
+		svc.announcedMonth = if firstRun == 1 then 12 else firstRun - 1
+
+		local remote = svc.remotes[Types.Notify]
+		local mark = #remote.sentToPlayers
+		OceanService.advanceCalendar(svc)
+		runner:flushTasks()
+		local kinds = notifyKindsSince(mark)
+
+		svc.ocean.month = savedMonth
+		svc.ocean.day = savedDay
+		svc.announcedMonth = savedAnnounced
+
+		assertTrue(
+			(kinds.run or 0) > 0,
+			"the month a salmon run begins produced no run toast"
+		)
+	end)
+
+	test("the same run is not announced twice", function()
+		-- A toast that repeats every tick teaches players to ignore toasts.
+		-- This is the one that has teeth: ocean.day stays at 1 for a whole
+		-- in-game day, so advanceCalendar is reached repeatedly inside it.
+		local salmon = Species.get("chinook")
+		assertTrue(salmon ~= nil, "no chinook in the roster")
+		assertTrue(
+			salmon.runMonths ~= nil and #salmon.runMonths > 0,
+			"chinook has no run window to announce"
+		)
+
+		local savedMonth = svc.ocean.month
+		local savedDay = svc.ocean.day
+		local savedAnnounced = svc.announcedMonth
+		local firstRun = salmon.runMonths[1]
+
+		svc.ocean.month = firstRun
+		svc.ocean.day = 1
+		svc.announcedMonth = if firstRun == 1 then 12 else firstRun - 1
+
+		local remote = svc.remotes[Types.Notify]
+		local mark = #remote.sentToPlayers
+		OceanService.advanceCalendar(svc)
+		runner:flushTasks()
+		local first = notifyKindsSince(mark)
+
+		-- same month, same day-1, several more ticks later in the day
+		local mark2 = #remote.sentToPlayers
+		for _ = 1, 5 do
+			OceanService.advanceCalendar(svc)
+		end
+		runner:flushTasks()
+		local second = notifyKindsSince(mark2)
+
+		-- and the middle of the same run window, a month later in the run
+		svc.ocean.month = firstRun + 1
+		svc.announcedMonth = firstRun
+		local mark3 = #remote.sentToPlayers
+		OceanService.advanceCalendar(svc)
+		runner:flushTasks()
+		local third = notifyKindsSince(mark3)
+
+		svc.ocean.month = savedMonth
+		svc.ocean.day = savedDay
+		svc.announcedMonth = savedAnnounced
+
+		assertTrue((first.run or 0) > 0, "the crossing itself did not announce")
+		assertEq(
+			second.run or 0,
+			0,
+			"a run was re-announced on later ticks of the same month — the toast is level-triggered, not edge-triggered"
+		)
+		assertEq(
+			third.run or 0,
+			0,
+			"a run that began last month was announced again while still running"
+		)
+	end)
+end)
+
+--=============================================================================
 -- Summary
 --=============================================================================
 
