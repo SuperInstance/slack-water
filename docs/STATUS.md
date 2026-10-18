@@ -151,8 +151,13 @@ since been fixed are marked, not quietly deleted.
 - **`run` and `market` toasts never fire** — no server code sends those kinds.
 - **`OceanClient.TIMEOUT = 4` is declared but never applied.** A hung request
   could stall a round. Worth fixing before the network path matters.
-- **The AI composer has still not been seen running in a live Studio session.**
-  The call shape is fixed and covered; the Worker is verified independently.
+- **The AI composer has still not admitted a bank in a live session.** The call
+  signature bug is fixed and covered by a test, and the Worker is verified
+  independently, but Roblox blocks the call itself:
+  `HTTP requests are not enabled. Enable via Experience Settings`. For an
+  unpublished experience this is enabled from Studio's Command Bar with
+  `game:GetService("HttpService").HttpEnabled = true` — it cannot be set from
+  runtime game code, and Rojo does not carry it, so it resets on a fresh clone.
 - **Mobile has never been run in the device emulator.**
 - **Persistence has never survived a restart** — Studio runs in-memory.
 

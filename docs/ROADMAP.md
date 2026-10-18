@@ -56,11 +56,26 @@ theory.
 
 ### Gate 2 — It has a URL
 
+- [ ] **Enable HTTP requests first.** This blocks everything else in this gate
+      and is one line in Studio's Command Bar:
+
+      ```lua
+      game:GetService("HttpService").HttpEnabled = true
+      ```
+
+      Or `File ⟩ Experience Settings ⟩ Security ⟩ Allow HTTP Requests` for a
+      published experience. It cannot be set from runtime game code, and it is
+      not managed by Rojo, so a fresh clone reproduces the problem.
+
+      Without it the game logs `backend unusable (request failed: HTTP requests
+      are not enabled. Enable via Experience Settings)` every composition
+      round and silently falls back to procedural banks. This is the third
+      distinct cause of that same symptom — see the note below.
 - [ ] Publish the place. Needs a human in Studio's UI.
-- [ ] Confirm the AI composer runs against the live Worker. The call shape was
-      fixed and covered by a test, and the Worker is verified independently
-      (`POST /banks/compose` returns `usedModel:true`), but it has **not** been
-      seen running inside a live Studio session.
+- [ ] Confirm the AI composer actually admits banks in a live session. The call
+      signature bug is fixed and covered by a test, and the Worker is verified
+      independently (`POST /banks/compose` returns `usedModel:true`), so this is
+      the last link in the chain.
 - [ ] Confirm persistence: restart the server and check the ocean comes back.
       Everything currently runs in-memory.
 
@@ -123,6 +138,16 @@ the AI composer was dead in the real engine, because the harness proved the
 correct `RequestAsync` signature while nothing checked that the production code
 used it. Treat a green suite as necessary, never sufficient. What saved these
 bugs was a screenshot or a log line, not a test.
+
+**"It falls back to procedural banks" has now had three separate causes** — the
+removed two-argument `RequestAsync` signature, and HTTP requests not being
+enabled for the experience. The log message is identical for every one of them,
+which is exactly why it survived so long. When you see that line, read the text
+*after* `request failed:`; it names the cause, and it changed each time.
+
+**Studio-only settings do not travel with the repo.** `HttpEnabled` is not
+managed by Rojo, so it resets for anyone who clones this. Expect to re-enable
+it after every fresh clone or new machine.
 
 **The harness is a model of Roblox, not Roblox.** It is deliberately strict —
 it raises on removed APIs, on type-confused property writes, on Script Security
