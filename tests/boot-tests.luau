@@ -551,10 +551,15 @@ suite("heartbeat — the simulation actually ticks", function()
 	local regionsBefore = #ocean.order
 
 	test("three pumped heartbeats tick the simulation three times", function()
+		-- Flushed between ticks, not after all three. Composition is deferred
+		-- and guarded against overlapping (see OceanService.advanceCalendar), so
+		-- a server that fires three ticks back to back and only then drains its
+		-- queue composes once and skips two. Draining between ticks is what a
+		-- real server does, and it is what makes "every tick composes" true.
 		for _ = 1, 3 do
 			roblox.services.RunService.Heartbeat:Fire(20)
+			runner:flushTasks()
 		end
-		runner:flushTasks()
 		assertEq(ocean.tickCount, tickBefore + 3, "tickCount")
 		assertEq(svc.hour, hourBefore + 3, "service hour clock")
 	end)
@@ -1136,6 +1141,64 @@ suite("harness fidelity — the Runner resolves what Studio resolves, and nothin
 			"function",
 			"the method must win over a child literally named GetChildren"
 		)
+	end)
+end)
+
+--=============================================================================
+-- The backend must not run on the heartbeat thread
+--=============================================================================
+
+suite("composition is deferred, not inline", function()
+	test("a tick schedules a compose round instead of blocking on it", function()
+		-- A compose round runs an AI model and can take seconds. RequestAsync is
+		-- synchronous and Roblox cannot cancel it, so running it inline stalls the
+		-- tick that asked for it and the ocean stops advancing while a model thinks.
+		-- The observable property: svc.round must not move until tasks are pumped.
+		--
+		-- This drives advanceCalendar directly rather than through Heartbeat, and
+		-- puts the calendar on a composing day first, so it does not depend on
+		-- where the simulation happens to be standing by the time the suite runs.
+		local savedDay, savedMonth = svc.ocean.day, svc.ocean.month
+		svc.ocean.day = 1
+		svc.ocean.month = 1 -- odd, so month % COMPOSE_INTERVAL_ROUNDS == 1
+
+		local roundBefore = svc.round
+
+		OceanService.advanceCalendar(svc)
+
+		assertEq(
+			svc.round,
+			roundBefore,
+			"advanceCalendar ran the compose round inline and blocked on the backend"
+		)
+
+		runner:flushTasks()
+
+		assertTrue(
+			svc.round > roundBefore,
+			"the deferred round never ran at all -- deferring dropped the work instead of moving it"
+		)
+
+		svc.ocean.day, svc.ocean.month = savedDay, savedMonth
+	end)
+
+	test("a slow round is not joined by another one", function()
+		-- The in-flight guard is what stops a slow backend stacking rounds up
+		-- behind itself. Simulated by leaving a round in flight and confirming
+		-- the next calendar opportunity declines to start a second.
+		svc.composeInFlight = true
+		local roundBefore = svc.round
+
+		OceanService.advanceCalendar(svc)
+		runner:flushTasks()
+
+		assertEq(
+			svc.round,
+			roundBefore,
+			"a second round started while one was still in flight"
+		)
+
+		svc.composeInFlight = false
 	end)
 end)
 

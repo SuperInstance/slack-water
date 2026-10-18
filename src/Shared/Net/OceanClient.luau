@@ -39,9 +39,19 @@ local OceanClient = {}
 -- The deployed Worker. Set to "" to run fully locally.
 OceanClient.BASE_URL = "https://slack-water.casey-digennaro.workers.dev"
 
---- Seconds before a request is abandoned. Kept short on purpose: a cast must
---- never hang waiting on the network, and the local simulation can answer
---- immediately instead.
+--- How long a slow backend call is allowed to take before we stop trusting its
+--- answer for anything time-sensitive.
+---
+--- READ THIS BEFORE ASSUMING IT IS A TIMEOUT. It is not one, and it cannot be
+--- made into one. HttpService:RequestAsync is synchronous and Roblox exposes no
+--- way to cancel an in-flight request, so there is no code that can abandon a
+--- hung call from this side. What this constant actually buys is a bound on how
+--- stale data we are willing to act on.
+---
+--- The real mitigation for a slow call is structural and lives in the caller:
+--- OceanService.advanceCalendar spawns the compose round instead of running it
+--- inline, so a model that thinks for ten seconds cannot stall the heartbeat
+--- that started it. That is the protection. This number is the backstop.
 OceanClient.TIMEOUT = 4
 
 local function url(path: string): string?

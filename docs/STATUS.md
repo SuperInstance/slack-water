@@ -149,8 +149,11 @@ since been fixed are marked, not quietly deleted.
   "reached at level N · price X" with no buy button.
 - **`contested` always arrives empty** — GROUNDS can never show `⚔ CONTESTED`.
 - **`run` and `market` toasts never fire** — no server code sends those kinds.
-- **`OceanClient.TIMEOUT = 4` is declared but never applied.** A hung request
-  could stall a round. Worth fixing before the network path matters.
+- ~~**`OceanClient.TIMEOUT` is declared but never applied.**~~ — the comment
+  now says plainly what it is and is not: Roblox exposes no way to cancel an
+  in-flight `RequestAsync`, so no timeout is possible from this side. The real
+  mitigation is structural and now exists: `advanceCalendar` defers the compose
+  round, so a slow model cannot stall the heartbeat that started it.
 - **The AI composer has still not admitted a bank in a live session.** The call
   signature bug is fixed and covered by a test, and the Worker is verified
   independently, but Roblox blocks the call itself:

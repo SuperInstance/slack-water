@@ -101,9 +101,10 @@ never been opened.
    there is no funds owner on the server to deduct from, so locked rows
    honestly show "reached at level N · price X" with no buy button. Needs a
    server-side funds owner first.
-5. **Apply `OceanClient.TIMEOUT`.** Declared at 4 seconds, never actually
-   applied. A hung request could stall a simulation round. Small fix, real
-   risk.
+5. ~~**Apply `OceanClient.TIMEOUT`.**~~ — resolved honestly rather than
+   cosmetically. Roblox cannot cancel an in-flight `RequestAsync`, so no client
+   timeout is possible. `advanceCalendar` now defers the compose round, which is
+   the protection that actually works.
 6. **Check `contested` end to end.** `broadcastOcean` always sends `{}`, so
    GROUNDS can never show `⚔ CONTESTED`. Either populate it or stop pretending
    the field exists.

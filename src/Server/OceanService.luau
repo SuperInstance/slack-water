@@ -45,6 +45,7 @@ export type Service = {
 	backendOnline: boolean,
 	everSynced: boolean,
 	reconciler: any,
+	composeInFlight: boolean,
 }
 
 local Service = {}
@@ -142,6 +143,7 @@ function Service.start(): Service?
 		round = 0,
 		hour = 0,
 		backendOnline = false,
+		composeInFlight = false,
 		everSynced = false,
 		reconciler = Reconcile.new(),
 
@@ -214,7 +216,39 @@ function Service.advanceCalendar(svc: Service)
 	end
 
 	if svc.ocean.month % COMPOSE_INTERVAL_ROUNDS == 1 then
-		Service.composeNewBanks(svc)
+		-- Deliberately not inline.
+		--
+		-- A compose round runs an AI model and can take seconds to answer.
+		-- HttpService:RequestAsync is synchronous and Roblox provides no way to
+		-- cancel it, so calling it from inside the heartbeat handler stalls the
+		-- very tick that asked for it -- the ocean stops advancing while a model
+		-- thinks.
+		--
+		-- task.defer, not task.spawn: spawn runs its body immediately on a new
+		-- thread and only defers past the first yield, and there is no yield
+		-- before the HTTP call, so spawn would have moved nothing. defer queues
+		-- the work for the end of the current resumption cycle. The in-flight
+		-- guard stops a slow round stacking up behind itself.
+		if svc.composeInFlight then
+			return
+		end
+
+		svc.composeInFlight = true
+		task.defer(function()
+			local ok, err = pcall(function()
+				Service.composeNewBanks(svc)
+			end)
+			svc.composeInFlight = false
+			if not ok then
+				print(
+					string.format(
+						"[slack-water] compose round %d threw and was contained: %s",
+						svc.round,
+						tostring(err)
+					)
+				)
+			end
+		end)
 	end
 end
 
