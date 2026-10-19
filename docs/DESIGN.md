@@ -83,10 +83,10 @@ liveliness. Unresolved (§11).
 
 ## 4. Progression
 
-The gear table exists (`Types.Gear`, `src/Shared/Types.luau`) and **is not wired
-up**: the client never sends `gearId`, so `CastService.gearEffortFor` falls back
-to the handline for everyone, and nothing checks `price` or `unlockLevel`. The
-design below is a proposal built on those numbers.
+The gear table (`Types.Gear`, `src/Shared/Types.luau`) is wired: the gear sheet
+sends a `GearRequest`, and the server checks `price` and `unlockLevel` before
+charging the wallet and granting the gear. The ladder below is what that check
+enforces.
 
 | gear | effort | price | level | role |
 | --- | --- | --- | --- | --- |

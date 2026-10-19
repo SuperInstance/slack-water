@@ -26,12 +26,17 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Progression = require(Shared.Progression)
 local Remotes = require(script.Parent.Remotes)
+local WalletService = require(script.Parent.Wallet)
 
 export type Service = {
 	remotes: { [string]: any },
 	profiles: { [any]: any },
 	dirty: { [any]: boolean },
 	store: any,
+	-- WalletService, joined at start(). Held so sync() can report the balance
+	-- alongside the gear: the gear sheet cannot price a purchase without it,
+	-- and the sheet is the only place the number is legible next to the prices.
+	wallets: any,
 }
 
 local ProfileService = {}
@@ -125,8 +130,13 @@ end
 --     level: number, levelInto: number, levelNeeded: number,
 --     fraction: number, xp: number,
 --     currentGearId: string, ownedGear: { string },
+--     balanceCents: number,
 --     equipError: string?,
 --   }
+--
+-- `equipError` is now the refusal channel for any gear request, buy included.
+-- The client renders it and nothing else; it never decides whether a purchase
+-- is affordable.
 --=============================================================================
 
 local function sync(svc: Service, player: any, equipError: string?): ()
@@ -140,6 +150,10 @@ local function sync(svc: Service, player: any, equipError: string?): ()
 
 	local progress = Progression.levelProgress(profile)
 	local snapshot = Progression.snapshot(profile)
+	local balanceCents = 0
+	if svc.wallets then
+		balanceCents = WalletService.recordFor(svc.wallets, player).balanceCents
+	end
 	svc.remotes[Remotes.ProfileSync]:FireClient(player, {
 		level = progress.level,
 		levelInto = progress.intoLevel,
@@ -148,6 +162,7 @@ local function sync(svc: Service, player: any, equipError: string?): ()
 		xp = profile.xp,
 		currentGearId = snapshot.currentGearId,
 		ownedGear = snapshot.ownedGear,
+		balanceCents = balanceCents,
 		equipError = equipError,
 	})
 end
@@ -242,12 +257,22 @@ function ProfileService.start(): Service
 		profiles = {},
 		dirty = {},
 		store = openStore(),
+		wallets = nil,
 	}
 
-	-- Work different owned gear. Progression.equip is the whole rule: the
-	-- server decides what the player holds, a request can only pick among
-	-- owned gear, and the answer — success or refusal — is the next
-	-- ProfileSync. The client never predicts the switch.
+	-- The funds owner. Gear lives in the profile and money lives in the wallet,
+	-- so buying one needs both; the wallet owns the balance and is the only
+	-- thing allowed to reduce it. start() is idempotent and CastService starts
+	-- it too, so this is a join, not a second wallet.
+	local wallets = WalletService.start()
+	svc.wallets = wallets
+
+	-- Work different owned gear, or buy the gear you do not own yet.
+	--
+	-- Progression owns every rule about what gear exists and whether a profile
+	-- qualifies for it; the server decides what a player holds, so a request can
+	-- only pick among the catalogue, and the answer — success or refusal — is
+	-- the next ProfileSync. The client never predicts the outcome.
 	svc.remotes[Remotes.GearRequest].OnServerEvent:Connect(function(player: any, payload: any)
 		local profile = svc.profiles[player]
 		if not profile then
@@ -268,11 +293,39 @@ function ProfileService.start(): Service
 			return
 		end
 
-		local ok, err = Progression.equip(profile, gearId)
-		if ok then
-			svc.dirty[player] = true
+		if Progression.owns(profile, gearId) then
+			local ok, err = Progression.equip(profile, gearId)
+			if ok then
+				svc.dirty[player] = true
+			end
+			sync(svc, player, if ok then nil else err)
+			return
 		end
-		sync(svc, player, if ok then nil else err)
+
+		-- Not owned: this is a purchase.
+		--
+		-- Charge first, grant second. The other order hands out gear and then
+		-- hopes the charge lands; here a refusal leaves the player exactly as
+		-- they were, which is the failure that is safe to get wrong.
+		local record = WalletService.recordFor(wallets, player)
+		local allowed, refusal, price = Progression.canBuy(profile, gearId, record.balanceCents)
+		if not allowed then
+			sync(svc, player, refusal)
+			return
+		end
+
+		local paid, payErr = WalletService.debit(wallets, player, price)
+		if not paid then
+			sync(svc, player, payErr)
+			return
+		end
+
+		Progression.grantGear(profile, gearId)
+		svc.dirty[player] = true
+		-- No error line. The feedback is the row itself: it stops offering a
+		-- price and starts showing effort, because the next ProfileSync is the
+		-- authority and the client does not predict any of it.
+		sync(svc, player, nil)
 	end)
 
 	Players.PlayerAdded:Connect(function(player: any)

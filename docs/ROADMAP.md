@@ -97,10 +97,10 @@ never been opened.
 
 ### High
 
-4. **Wire gear purchases.** `Progression.buy` validates level and funds but
-   there is no funds owner on the server to deduct from, so locked rows
-   honestly show "reached at level N · price X" with no buy button. Needs a
-   server-side funds owner first.
+4. ~~**Wire gear purchases.**~~ — done. `WalletService.debit` is the funds
+   owner; `ProfileService` validates, charges, then grants. Unowned gear is a
+   BUY tap in the gear sheet and the purse rides on `ProfileSync`. Not yet seen
+   on screen: no human has tapped BUY.
 5. ~~**Apply `OceanClient.TIMEOUT`.**~~ — resolved honestly rather than
    cosmetically. Roblox cannot cancel an in-flight `RequestAsync`, so no client
    timeout is possible. `advanceCalendar` now defers the compose round, which is

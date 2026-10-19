@@ -142,10 +142,10 @@ against the exact bytes `UpdateAsync` writes.
   still a client invention and should not be believed; the card's old
   "+ value" line (which implied money was credited) is gone from
   CatchCard, which now shows the server's quote as a quote.
-- **Gear purchases are not wired.** `Progression.buy(profile, gearId, funds)`
-  already expects a caller-owned funds store; the wallet is that store
-  (`Wallet.debit(gear.price * 100)` — prices are credits). No purchase
-  remote exists yet.
+- **Gear purchases are now wired** through `WalletService.debit`, the only
+  function that may reduce a balance. `ProfileService` owns the transaction
+  because gear lives in the profile and money lives here, and it charges before
+  it grants: a refusal then leaves the player exactly as they were.
 - **No economy constant or formula changed**, so `shared/economy-vectors.json`
   did not need regenerating and Worker parity is untouched.
 - Nothing ran in Studio. The `Environment`/region-listener boot defects that

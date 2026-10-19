@@ -247,6 +247,42 @@ function WalletService.recordCatch(svc: Service, player: any, info: any): any
 end
 
 --=============================================================================
+-- Spending
+--=============================================================================
+
+--- Take money out of a wallet. The only function in the codebase that may
+--- reduce a balance — sells add, catches add, nothing else touches
+--- record.balanceCents.
+---
+--- Authoritative rather than trusting a caller's arithmetic: the balance here
+--- is the truth, so a caller that computed affordability itself is only a hint.
+--- The caller is expected to have validated first (Progression.canBuy), but
+--- this refuses on its own terms and the caller must handle that, because a
+--- service that quietly overdraws is worse than one that declines.
+---
+--- Returns the new balance on success. No yield occurs between the check and
+--- the subtraction, so no second request can observe a half-spent wallet.
+function WalletService.debit(svc: Service, player: any, cents: number): (boolean, string?)
+	local record = svc.records[player]
+	if not record then
+		return false, "no wallet"
+	end
+	if type(cents) ~= "number" or cents ~= cents or cents < 0 then
+		-- non-number, NaN, or negative. A negative price would silently pay the
+		-- player to take delivery of the gear.
+		return false, "bad amount"
+	end
+	if record.balanceCents < cents then
+		return false, "not enough funds"
+	end
+
+	record.balanceCents -= cents
+	svc.dirty[player] = true
+	sync(svc, player)
+	return true, nil
+end
+
+--=============================================================================
 -- Selling
 --=============================================================================
 

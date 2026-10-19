@@ -99,6 +99,24 @@ function Ui.formatInt(n: number): string
 	return sign .. digits .. grouped
 end
 
+--- Money in the game's own unit: integer cents, rendered as dollars and cents
+--- ("2.50", "1,204").
+---
+--- Lives here rather than in one panel because two panels now print the same
+--- purse. Gear prices and wallet balances are both cents, and a rod that costs
+--- 2.50 must not read "250" beside a balance that reads "2.50".
+function Ui.formatMoney(cents: number): string
+	local c = math.floor(Ui.tonum(cents, 0) + 0.5)
+	local sign = if c < 0 then "-" else ""
+	c = math.abs(c)
+	local whole = math.floor(c / 100)
+	local rest = c - whole * 100
+	if rest == 0 then
+		return sign .. Ui.formatInt(whole)
+	end
+	return string.format("%s%s.%02d", sign, Ui.formatInt(whole), rest)
+end
+
 --- An absolute game hour as a clock face ("13:40"). "Hour 61.3" is navigator
 --- talk; the HUD speaks to players.
 function Ui.clockFace(hour: number): string

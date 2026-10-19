@@ -182,11 +182,13 @@ matter first, in order):
   dry out, so roughly 4–5 of a 60-ground ocean are tide-gated. Two tests in
   `tests/tide-chart-tests.luau` pin it and are confirmed red without the fix.
   Note the lowest water is -2.03 m, not the -2.57 m previously written down.
-- **Buying gear is not wired.** `Progression.buy` exists and validates level +
-  funds, but the server has no wallet/money store to deduct from, so GearBar
-  only ever *equips* gear the profile already owns. Locked rows honestly show
-  "reached at level N · price X" with no buy button. Wiring the buy needs a
-  funds owner first (see `src/Server/README.md`).
+- **Buying gear is wired.** Unowned-but-unlocked rows are a whole-row BUY tap
+  sending the same `GearRequest` an equip sends; the server decides and the next
+  `ProfileSync` is the answer. The purse arrives on that sync and prices the
+  rows. The BUY/SHORT chip only greys the button early — the server re-checks
+  every request, so a stale balance can never buy anything. Prices render
+  through `Ui.formatMoney`, shared with MarketPanel, so a 2.50 rod does not read
+  "250" next to a balance that reads "2.50".
 - **Default Roblox chrome** (chat top-left, player list top-right, mobile
   jump button bottom-right) can overlap the HUD cluster and the CAST bar
   until the game disables it with `StarterGui:SetCoreGuiEnabled`; that call

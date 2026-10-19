@@ -103,6 +103,16 @@ local function main(): ()
 		visible = false,
 	})
 
+	-- the purse, straight off the server's ProfileSync. Never derived here.
+	local fundsLabel = Ui.label(summary, {
+		text = "",
+		textSize = 11,
+		font = Enum.Font.GothamBold,
+		color = "text",
+		size = UDim2.new(1, -96, 0, 14),
+		pos = UDim2.fromOffset(10, 8),
+	})
+
 	-- the level rides on the edge toggle so the career is visible while closed
 	local badgeChip = Ui.chip(sheet.toggle, "LV 1", "gold", {
 		pos = UDim2.new(0.5, 0, 0, -14),
@@ -151,6 +161,12 @@ local function main(): ()
 
 	local PLAIN_LANGUAGE: { [string]: string } = {
 		["not owned"] = "you do not hold this gear",
+		["not enough funds"] = "not enough money — sell a fish first",
+		["locked"] = "that one needs a higher level",
+		["already owned"] = "you already hold that",
+		["bad amount"] = "that purchase did not add up",
+		["too fast"] = "easy on the tackle case",
+		["no wallet"] = "no purse — tell Casey",
 	}
 
 	local function rebuild(profile: any): ()
@@ -167,6 +183,12 @@ local function main(): ()
 				end
 			end
 		end
+
+		-- Server-sent purse. Shown next to the prices because a purchase sheet
+		-- that lists costs without the money is not a price list, it is a tease.
+		-- Reading it is not computing value: the affordability chip below only
+		-- greys the button early, and the server still re-checks every request.
+		local balance = tonumber(profile.balanceCents) or 0
 
 		-- the catalogue in unlock order, so the ladder reads top to bottom
 		local catalogue: { any } = {}
@@ -213,11 +235,11 @@ local function main(): ()
 				subText = "🔒 reached at level "
 					.. tostring(gear.unlockLevel)
 					.. " · price "
-					.. Ui.formatInt(gear.price)
+					.. Ui.formatMoney(gear.price)
 			elseif isOwned then
 				subText = "effort " .. tostring(gear.effort)
 			else
-				subText = "within reach · price " .. Ui.formatInt(gear.price)
+				subText = "within reach · price " .. Ui.formatMoney(gear.price)
 			end
 			Ui.label(row, {
 				text = subText,
@@ -252,6 +274,35 @@ local function main(): ()
 					local request = gearRequestRemote
 					if request then
 						request:FireServer({ gearId = gearId })
+					end
+				end)
+			elseif not isLocked then
+				-- Within reach: this row spends money, so it gets the same
+				-- whole-row target as an equip and lets the server answer.
+				--
+				-- The chip greys out when the last-synced purse is short. That is
+				-- a courtesy, not a rule — the server re-checks, and a stale
+				-- balance can only make the button look wrong, never buy
+				-- anything. If it ever looks wrong the tap still works and the
+				-- refusal is explained in the summary line.
+				local affordable = balance >= gear.price
+				Ui.chip(row, if affordable then "BUY" else "SHORT", if affordable then "gold" else "dim", {
+					pos = UDim2.new(1, -10, 0, 25),
+					anchor = Vector2.new(1, 0),
+				})
+
+				local overlay = Ui.button(row, {
+					name = "Buy",
+					text = "",
+					size = UDim2.fromScale(1, 1),
+					transparency = 1,
+					zindex = 3,
+				})
+				local buyId = gear.id
+				Ui.connect(rowConns, overlay.Activated, function()
+					local request = gearRequestRemote
+					if request then
+						request:FireServer({ gearId = buyId })
 					end
 				end)
 			end
@@ -290,6 +341,11 @@ local function main(): ()
 			xpLabel.Text = Ui.formatInt(into) .. " / " .. Ui.formatInt(needed) .. " xp"
 		end
 		Ui.setMeter(xpMeter, math.clamp(tonumber(payload.fraction) or 0, 0, 1))
+
+		local balance = tonumber(payload.balanceCents)
+		if balance then
+			fundsLabel.Text = Ui.formatMoney(balance) .. " in the purse"
+		end
 
 		-- a refusal is explained once, then fades; a clean sync does not
 		-- interrupt the explanation mid-read

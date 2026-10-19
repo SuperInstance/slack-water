@@ -83,7 +83,9 @@ for older fixtures): `level: number?`, `xpGained: number?`,
   `src/Shared/Config.luau` even though CastService rate-limits against it;
   the constant is believed to be part of an in-flight Shared change. Until it
   lands, the first cast from a player errors inside the handler.
-- **Buying gear is not wired.** `Progression.buy` validates level and funds
-  and deliberately leaves the wallet to the caller, but no funds store exists
-  server-side, so nothing can call it honestly. Gear ownership beyond the
-  starter is reachable only through a restored save today.
+- **Buying gear is wired.** `ProfileService` runs the transaction across both
+  stores: `Progression.canBuy` validates, `WalletService.debit` takes the
+  money, `Progression.grantGear` hands over the gear. Charge precedes grant on
+  purpose. `ProfileSync` carries `balanceCents` so the gear sheet can price
+  against a real purse, and `equipError` is now the refusal channel for buys
+  too.

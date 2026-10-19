@@ -311,26 +311,59 @@ function Progression.newlyUnlocked(fromLevel: number, toLevel: number): { Gear }
 	return out
 end
 
+--- Can this profile be given this gear right now, and what does it cost?
+---
+--- Pure: reads the profile and the offered funds, mutates nothing. Split out
+--- from buy() because the real transaction spans two stores — the profile here
+--- and the wallet in the server — and the money has to be taken before the gear
+--- is granted. A single function that both validates and grants forces the
+--- caller to either charge after granting or trust that a later failure cannot
+--- happen. Neither is a comfortable place to be.
+---
+--- Returns the price to charge as the third value, so the caller never re-reads
+--- the catalogue and cannot charge a different number than the one validated.
+function Progression.canBuy(
+	profile: Profile,
+	gearId: string,
+	funds: number
+): (boolean, string?, number?)
+	local gear = Types.Gear[gearId]
+	if gear == nil then
+		return false, "unknown gear", 0
+	end
+	if profile.ownedGear[gearId] then
+		return false, "already owned", 0
+	end
+	if Progression.levelOf(profile) < gear.unlockLevel then
+		return false, "locked", 0
+	end
+	if funds < gear.price then
+		return false, "not enough funds", 0
+	end
+	return true, nil, gear.price
+end
+
+--- Hand over gear that canBuy() has already approved. Separated so the charge
+--- can happen first: see canBuy(). No validation here by design — a caller that
+--- skips canBuy hands out free gear, and that is a one-line mistake to make.
+function Progression.grantGear(profile: Profile, gearId: string): ()
+	profile.ownedGear[gearId] = true
+end
+
 --- Buy gear: validates level and funds, then grants ownership.
 ---
 --- Does NOT equip, and does NOT touch any wallet — the caller deducts
 --- `gear.price` from its own funds store only when this returns true, so
 --- money has exactly one owner.
+---
+--- Composed from canBuy + grantGear. Kept for callers that hold both stores in
+--- one place and can afford to charge afterwards; the server does not use it.
 function Progression.buy(profile: Profile, gearId: string, funds: number): (boolean, string?)
-	local gear = Types.Gear[gearId]
-	if gear == nil then
-		return false, "unknown gear"
+	local ok, err = Progression.canBuy(profile, gearId, funds)
+	if not ok then
+		return false, err
 	end
-	if profile.ownedGear[gearId] then
-		return false, "already owned"
-	end
-	if Progression.levelOf(profile) < gear.unlockLevel then
-		return false, "locked"
-	end
-	if funds < gear.price then
-		return false, "not enough funds"
-	end
-	profile.ownedGear[gearId] = true
+	Progression.grantGear(profile, gearId)
 	return true, nil
 end
 

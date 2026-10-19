@@ -731,6 +731,254 @@ do
 		end)
 	end)
 
+	-- ==================================================================
+	-- Buying gear
+	--
+	-- This is the purchase that used to not exist. Progression.buy validated
+	-- level and funds and granted ownership, and nothing called it: there was
+	-- no buyer, no deduction, and no way to spend money on anything. The whole
+	-- economy was sell-only.
+	--
+	-- The transaction spans two stores — gear in the profile, money in the
+	-- wallet — so these tests watch BOTH sides of it. A handler that granted
+	-- the gear and forgot the money would pass any test that only looked at
+	-- ownedGear, which is exactly the bug the missing owner invited.
+	-- ==================================================================
+
+	local ProfileService = runner:load("src/Server/ProfileService.luau")
+	local Progression = runner:load("src/Shared/Progression.luau")
+	local Types = runner:load("src/Shared/Types.luau")
+
+	local gearRemote = walletRemote("GearRequest")
+	local profileSyncRemote = walletRemote("ProfileSync")
+
+	-- The rod: the cheapest thing that is actually purchasable, so a purchase
+	-- test does not depend on the market paying out a large enough fish.
+	local ROD = Types.Gear["rod"]
+	local GEAR_COOLDOWN = 0.5
+
+	local buyer: any = nil
+	local profiles: any = nil
+
+	suite("server gear — buying spends money and grants gear", function()
+		test("the gear remotes exist", function()
+			assertTrue(gearRemote ~= nil, "GearRequest was never created")
+			assertTrue(profileSyncRemote ~= nil, "ProfileSync was never created")
+		end)
+
+		test("set up a skipper who can afford and qualify for the rod", function()
+			buyer = roblox.makePlayer(777, "skipper_buys")
+			buyer.Parent = roblox.services.Players
+			roblox.services.Players.PlayerAdded:Fire(buyer)
+			runner:flushTasks()
+
+			profiles = ProfileService.get()
+			assertTrue(profiles ~= nil, "ProfileService never started")
+			local profile = profiles.profiles[buyer]
+			assertTrue(profile ~= nil, "the buyer got no profile")
+
+			-- Level and purse are set directly, on the server's own objects.
+			-- They are inputs to the transaction under test, not part of it:
+			-- earning them through casts would make this suite a second test
+			-- of the economy, and the economy already has one.
+			profile.xp = Progression.totalXpForLevel(ROD.unlockLevel)
+
+			local record = WalletService.recordFor(wallets, buyer)
+			record.balanceCents = ROD.price
+			wallets.dirty[buyer] = true
+
+			assertEq(Progression.levelOf(profile), ROD.unlockLevel, "level fixture is wrong")
+			assertFalse(Progression.owns(profile, ROD.id), "the buyer already owns the rod")
+		end)
+
+		test("buying takes the price and hands over the gear", function()
+			gearRemote.OnServerEvent:Fire(buyer, { gearId = ROD.id })
+			runner:flushTasks()
+
+			local profile = profiles.profiles[buyer]
+			local record = WalletService.recordFor(wallets, buyer)
+
+			assertTrue(
+				Progression.owns(profile, ROD.id),
+				"the rod was not granted — the request reached nothing"
+			)
+			assertEq(
+				record.balanceCents,
+				0,
+				"the gear was free: the wallet still holds the price"
+			)
+			assertTrue(
+				profiles.dirty[buyer] == true,
+				"the profile was not marked for save — a restart would lose the purchase"
+			)
+		end)
+
+		test("the purchase is not also an equip", function()
+			local profile = profiles.profiles[buyer]
+			assertEq(
+				profile.currentGearId,
+				Progression.STARTER_GEAR.id,
+				"buying silently equipped the rod; that is the player's next decision, not ours"
+			)
+		end)
+
+		test("the next ProfileSync reports the gear and the emptied purse", function()
+			local sync = lastResult(profileSyncRemote, buyer)
+			assertTrue(sync ~= nil, "no ProfileSync answered the purchase")
+			local sawRod = false
+			for _, id in sync.ownedGear do
+				if id == ROD.id then
+					sawRod = true
+				end
+			end
+			assertTrue(sawRod, "ProfileSync did not carry the new gear to the client")
+			assertEq(sync.equipError, nil, "a successful purchase reported a refusal")
+			assertEq(
+				sync.balanceCents,
+				0,
+				"ProfileSync did not carry the balance the gear sheet prices against"
+			)
+		end)
+
+		test("an unaffordable gear is refused and costs nothing", function()
+			spin(GEAR_COOLDOWN)
+			-- Qualified first, then short of money. Order matters: the same gear
+			-- at a lower level refuses as "locked" below, and a test that only
+			-- checked "some refusal arrived" would pass against either.
+			local drake = Types.Gear["longline"]
+			local profile = profiles.profiles[buyer]
+			profile.xp = Progression.totalXpForLevel(drake.unlockLevel)
+
+			local record = WalletService.recordFor(wallets, buyer)
+			local before = record.balanceCents
+			assertEq(before, 0, "fixture: the purse should be empty")
+			assertEq(
+				Progression.levelOf(profile),
+				drake.unlockLevel,
+				"fixture: the profile should now qualify for the rig"
+			)
+
+			gearRemote.OnServerEvent:Fire(buyer, { gearId = drake.id })
+			runner:flushTasks()
+
+			assertFalse(
+				Progression.owns(profile, drake.id),
+				"a longline rig was handed over with an empty purse"
+			)
+			assertEq(
+				record.balanceCents,
+				before,
+				"a refused purchase moved money"
+			)
+			local sync = lastResult(profileSyncRemote, buyer)
+			assertEq(sync.equipError, "not enough funds", "the refusal was not explained")
+		end)
+
+		test("a locked gear is refused before money is considered", function()
+			spin(GEAR_COOLDOWN)
+			-- Same rig, same empty purse, but back below its unlock level: the
+			-- level gate must win, so the player is told to level rather than to
+			-- go fishing for the money.
+			local profile = profiles.profiles[buyer]
+			local drake = Types.Gear["longline"]
+			profile.xp = Progression.totalXpForLevel(ROD.unlockLevel)
+			assertTrue(drake.unlockLevel > ROD.unlockLevel, "fixture is wrong")
+
+			gearRemote.OnServerEvent:Fire(buyer, { gearId = drake.id })
+			runner:flushTasks()
+
+			assertFalse(Progression.owns(profile, drake.id))
+			local sync = lastResult(profileSyncRemote, buyer)
+			assertEq(
+				sync.equipError,
+				"locked",
+				"a level-gated gear must say locked, not not enough funds"
+			)
+		end)
+
+		test("a spoofed price in the request is ignored", function()
+			spin(GEAR_COOLDOWN)
+			-- Stock the purse so the buy would otherwise succeed, then claim a
+			-- price of one cent. The charge must come from the catalogue.
+			local record = WalletService.recordFor(wallets, buyer)
+			record.balanceCents = ROD.price
+			wallets.dirty[buyer] = true
+
+			gearRemote.OnServerEvent:Fire(buyer, {
+				gearId = ROD.id,
+				price = 1,
+			})
+			runner:flushTasks()
+
+			-- Already owned from the first purchase, so this is an equip and
+			-- must move no money at all.
+			assertEq(
+				record.balanceCents,
+				ROD.price,
+				"the catalogue price was overridden by the payload"
+			)
+		end)
+
+		test("an unknown gear id is refused, not created", function()
+			spin(GEAR_COOLDOWN)
+			local profile = profiles.profiles[buyer]
+			local before = WalletService.recordFor(wallets, buyer).balanceCents
+
+			gearRemote.OnServerEvent:Fire(buyer, { gearId = "gravitation_net" })
+			runner:flushTasks()
+
+			assertTrue(
+				profile.ownedGear["gravitation_net"] == nil,
+				"a gear id that is not in the catalogue was written into the profile"
+			)
+			assertEq(WalletService.recordFor(wallets, buyer).balanceCents, before)
+			local sync = lastResult(profileSyncRemote, buyer)
+			assertEq(sync.equipError, "unknown gear")
+		end)
+
+		test("a malformed gear request is answered, not crashed", function()
+			spin(GEAR_COOLDOWN)
+			local before = WalletService.recordFor(wallets, buyer).balanceCents
+
+			gearRemote.OnServerEvent:Fire(buyer, "not a table")
+			runner:flushTasks()
+			local sync = lastResult(profileSyncRemote, buyer)
+			assertEq(sync.equipError, "malformed request")
+
+			spin(GEAR_COOLDOWN)
+			gearRemote.OnServerEvent:Fire(buyer, { gearId = 5 })
+			runner:flushTasks()
+			sync = lastResult(profileSyncRemote, buyer)
+			assertEq(sync.equipError, "malformed request")
+
+			assertEq(
+				WalletService.recordFor(wallets, buyer).balanceCents,
+				before,
+				"malformed gear requests moved money"
+			)
+		end)
+
+		test("equipping the purchased rod still works and still costs nothing", function()
+			spin(GEAR_COOLDOWN)
+			local profile = profiles.profiles[buyer]
+			local record = WalletService.recordFor(wallets, buyer)
+			local purseBefore = record.balanceCents
+
+			gearRemote.OnServerEvent:Fire(buyer, { gearId = ROD.id })
+			runner:flushTasks()
+
+			assertEq(profile.currentGearId, ROD.id, "the owned rod could not be equipped")
+			assertEq(record.balanceCents, purseBefore, "equipping charged for the gear")
+		end)
+
+		test("the effort a cast is clamped to follows the equipped gear", function()
+			-- The purchase is only worth making if the rod actually changes the
+			-- game: Progression.effortFor is what CastService reads.
+			local profile = profiles.profiles[buyer]
+			assertEq(Progression.effortFor(profile), ROD.effort, "the rod's effort did not take")
+		end)
+	end)
+
 	suite("server wallet — no background errors", function()
 		test("no task or event handler errored during the whole run", function()
 			local problems = {}

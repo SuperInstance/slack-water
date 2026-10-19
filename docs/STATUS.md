@@ -144,9 +144,11 @@ since been fixed are marked, not quietly deleted.
 
 - **The cast loop has never been played by a person.** This remains the
   largest unknown in the project.
-- **Buying gear is not wired.** `Progression.buy` validates level and funds but
-  there is no funds owner to deduct from. Locked rows honestly show
-  "reached at level N · price X" with no buy button.
+- ~~**Buying gear is not wired.**~~ — the funds owner is `WalletService.debit`,
+  and `ProfileService` runs the two-store transaction: validate with
+  `Progression.canBuy`, charge, then `grantGear`. The gear sheet now offers
+  unowned gear as a whole-row BUY tap and shows the server-sent purse beside the
+  prices. Buying does not equip.
 - ~~**`contested` always arrives empty.**~~ — `broadcastOcean` hardcoded `{}`,
   so GROUNDS could never show `⚔ CONTESTED` and the flag existed only on a catch
   card. It now applies the same rule `OceanSim.harvest` uses per catch — more

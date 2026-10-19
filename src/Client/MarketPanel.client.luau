@@ -80,16 +80,6 @@ local function main(): ()
 
 	-- cents -> credits, for display only — division and formatting, never
 	-- valuation (house rule 2)
-	local function formatMoney(cents: number): string
-		local c = math.floor(Ui.tonum(cents, 0) + 0.5)
-		local whole = math.floor(c / 100)
-		local rest = c - whole * 100
-		if rest == 0 then
-			return Ui.formatInt(whole)
-		end
-		return string.format("%d.%02d", whole, rest)
-	end
-
 	local function normalizeWallet(raw: any): WalletState
 		local out: WalletState = { balanceCents = nil, hold = {} }
 		if typeof(raw) ~= "table" then
@@ -177,7 +167,7 @@ local function main(): ()
 				pos = UDim2.fromOffset(10, 6),
 			})
 			Ui.label(balanceRow, {
-				text = formatMoney(wallet.balanceCents),
+				text = Ui.formatMoney(wallet.balanceCents),
 				textSize = 17,
 				font = Enum.Font.GothamBold,
 				color = "gold",
@@ -417,7 +407,7 @@ local function main(): ()
 		if wallet.balanceCents ~= nil then
 			-- the sheet's subtitle carries the balance everywhere the sheet
 			-- goes; it is the server's number, never a local sum
-			sheet:setSubtitle("balance " .. formatMoney(wallet.balanceCents))
+			sheet:setSubtitle("balance " .. Ui.formatMoney(wallet.balanceCents))
 		end
 		if sheet.isOpen then
 			renderCurrent()
@@ -437,7 +427,7 @@ local function main(): ()
 		if payload.ok == true and type(payload.paidCents) == "number" then
 			pendingSell[payload.catchId] = nil
 			-- stay disabled; the WalletSync that follows removes the row
-			entry.note.Text = "✓ sold for " .. formatMoney(Ui.tonum(payload.paidCents, 0))
+			entry.note.Text = "✓ sold for " .. Ui.formatMoney(Ui.tonum(payload.paidCents, 0))
 			return
 		end
 
